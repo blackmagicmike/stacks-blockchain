@@ -32,6 +32,7 @@ use net::db::PeerDB;
 use net::http::*;
 use net::p2p::PeerMap;
 use net::p2p::PeerNetwork;
+use net::relay::Relayer;
 use net::ClientError;
 use net::Error as net_error;
 use net::HttpRequestMetadata;
@@ -186,8 +187,10 @@ impl RPCPeerInfoData {
         };
 
         let server_version = version_string(
-            option_env!("CARGO_PKG_NAME").unwrap_or("stacks-node"),
-            option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0.0"),
+            "stacks-node",
+            option_env!("STACKS_NODE_VERSION")
+                .or(option_env!("CARGO_PKG_VERSION"))
+                .unwrap_or("0.0.0.0"),
         );
         let stacks_tip_consensus_hash = burnchain_tip.canonical_stacks_tip_consensus_hash;
         let stacks_tip = burnchain_tip.canonical_stacks_tip_hash;
@@ -244,11 +247,11 @@ impl RPCPoxInfoData {
                     env.execute_contract(&contract_identifier, function, &vec![], true)
                 })
             })
-            .ok_or(net_error::NotFoundError)?;
+            .map_err(|_| net_error::NotFoundError)?;
 
         let res = match data {
-            Ok(res) => res.expect_result_ok().expect_tuple(),
-            Err(_e) => return Err(net_error::DBError(db_error::NotFoundError)),
+            Some(Ok(res)) => res.expect_result_ok().expect_tuple(),
+            _ => return Err(net_error::DBError(db_error::NotFoundError)),
         };
 
         let first_burnchain_block_height = res
@@ -1041,8 +1044,10 @@ impl ConversationHttp {
                     }
                 })
             }) {
-                Some(data) => HttpResponseType::GetAccount(response_metadata, data),
-                None => HttpResponseType::NotFound(response_metadata, "Chain tip not found".into()),
+                Ok(Some(data)) => HttpResponseType::GetAccount(response_metadata, data),
+                Ok(None) | Err(_) => {
+                    HttpResponseType::NotFound(response_metadata, "Chain tip not found".into())
+                }
             };
 
         response.send(http, fd).map(|_| ())
@@ -1097,8 +1102,10 @@ impl ConversationHttp {
                     MapEntryResponse { data, marf_proof }
                 })
             }) {
-                Some(data) => HttpResponseType::GetMapEntry(response_metadata, data),
-                None => HttpResponseType::NotFound(response_metadata, "Chain tip not found".into()),
+                Ok(Some(data)) => HttpResponseType::GetMapEntry(response_metadata, data),
+                Ok(None) | Err(_) => {
+                    HttpResponseType::NotFound(response_metadata, "Chain tip not found".into())
+                }
             };
 
         response.send(http, fd).map(|_| ())
@@ -1129,7 +1136,7 @@ impl ConversationHttp {
             .map(|x| SymbolicExpression::atom_value(x.clone()))
             .collect();
 
-        let data_opt =
+        let data_opt_res =
             chainstate.maybe_read_only_clarity_tx(&sortdb.index_conn(), tip, |clarity_tx| {
                 let cost_track = clarity_tx
                     .with_clarity_db_readonly(|clarity_db| {
@@ -1147,8 +1154,8 @@ impl ConversationHttp {
                 })
             });
 
-        let response = match data_opt {
-            Some(Ok(data)) => HttpResponseType::CallReadOnlyFunction(
+        let response = match data_opt_res {
+            Ok(Some(Ok(data))) => HttpResponseType::CallReadOnlyFunction(
                 response_metadata,
                 CallReadOnlyResponse {
                     okay: true,
@@ -1156,7 +1163,7 @@ impl ConversationHttp {
                     cause: None,
                 },
             ),
-            Some(Err(e)) => HttpResponseType::CallReadOnlyFunction(
+            Ok(Some(Err(e))) => HttpResponseType::CallReadOnlyFunction(
                 response_metadata,
                 CallReadOnlyResponse {
                     okay: false,
@@ -1164,7 +1171,9 @@ impl ConversationHttp {
                     cause: Some(e.to_string()),
                 },
             ),
-            None => HttpResponseType::NotFound(response_metadata, "Chain tip not found".into()),
+            Ok(None) | Err(_) => {
+                HttpResponseType::NotFound(response_metadata, "Chain tip not found".into())
+            }
         };
 
         response.send(http, fd).map(|_| ())
@@ -1209,12 +1218,14 @@ impl ConversationHttp {
                     })
                 })
             }) {
-                Some(Some(data)) => HttpResponseType::GetContractSrc(response_metadata, data),
-                Some(None) => HttpResponseType::NotFound(
+                Ok(Some(Some(data))) => HttpResponseType::GetContractSrc(response_metadata, data),
+                Ok(Some(None)) => HttpResponseType::NotFound(
                     response_metadata,
                     "No contract source data found".into(),
                 ),
-                None => HttpResponseType::NotFound(response_metadata, "Chain tip not found".into()),
+                Ok(None) | Err(_) => {
+                    HttpResponseType::NotFound(response_metadata, "Chain tip not found".into())
+                }
             };
 
         response.send(http, fd).map(|_| ())
@@ -1246,12 +1257,14 @@ impl ConversationHttp {
                     contract.contract_interface
                 })
             }) {
-                Some(Some(data)) => HttpResponseType::GetContractABI(response_metadata, data),
-                Some(None) => HttpResponseType::NotFound(
+                Ok(Some(Some(data))) => HttpResponseType::GetContractABI(response_metadata, data),
+                Ok(Some(None)) => HttpResponseType::NotFound(
                     response_metadata,
                     "No contract interface data found".into(),
                 ),
-                None => HttpResponseType::NotFound(response_metadata, "Chain tip not found".into()),
+                Ok(None) | Err(_) => {
+                    HttpResponseType::NotFound(response_metadata, "Chain tip not found".into())
+                }
             };
 
         response.send(http, fd).map(|_| ())
@@ -2823,7 +2836,7 @@ mod test {
         // build 1-block microblock stream with the contract-call and the unconfirmed contract
         let microblock = {
             let sortdb = peer_1.sortdb.take().unwrap();
-            PeerNetwork::setup_unconfirmed_state(peer_1.chainstate(), &sortdb).unwrap();
+            Relayer::setup_unconfirmed_state(peer_1.chainstate(), &sortdb).unwrap();
             let mblock = {
                 let sort_iconn = sortdb.index_conn();
                 let mut microblock_builder = StacksMicroblockBuilder::new(
@@ -2926,7 +2939,7 @@ mod test {
         let mut peer_1_stacks_node = peer_1.stacks_node.take().unwrap();
         let mut peer_1_mempool = peer_1.mempool.take().unwrap();
 
-        PeerNetwork::setup_unconfirmed_state(&mut peer_1_stacks_node.chainstate, &peer_1_sortdb)
+        Relayer::setup_unconfirmed_state(&mut peer_1_stacks_node.chainstate, &peer_1_sortdb)
             .unwrap();
 
         convo_1
@@ -2953,7 +2966,7 @@ mod test {
         let mut peer_2_stacks_node = peer_2.stacks_node.take().unwrap();
         let mut peer_2_mempool = peer_2.mempool.take().unwrap();
 
-        PeerNetwork::setup_unconfirmed_state(&mut peer_2_stacks_node.chainstate, &peer_2_sortdb)
+        Relayer::setup_unconfirmed_state(&mut peer_2_stacks_node.chainstate, &peer_2_sortdb)
             .unwrap();
 
         convo_2
@@ -2994,7 +3007,7 @@ mod test {
         let mut peer_1_stacks_node = peer_1.stacks_node.take().unwrap();
         let mut peer_1_mempool = peer_1.mempool.take().unwrap();
 
-        PeerNetwork::setup_unconfirmed_state(&mut peer_1_stacks_node.chainstate, &peer_1_sortdb)
+        Relayer::setup_unconfirmed_state(&mut peer_1_stacks_node.chainstate, &peer_1_sortdb)
             .unwrap();
 
         convo_1
@@ -3571,7 +3584,7 @@ mod test {
                 .unwrap();
 
                 let sortdb = peer_server.sortdb.take().unwrap();
-                PeerNetwork::setup_unconfirmed_state(peer_server.chainstate(), &sortdb).unwrap();
+                Relayer::setup_unconfirmed_state(peer_server.chainstate(), &sortdb).unwrap();
                 peer_server.sortdb = Some(sortdb);
 
                 assert!(peer_server.chainstate().unconfirmed_state.is_some());
