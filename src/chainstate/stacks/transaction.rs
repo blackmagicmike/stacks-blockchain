@@ -30,7 +30,7 @@ use chainstate::stacks::*;
 
 use core::*;
 
-use net::StacksPublicKeyBuffer;
+use crate::types::StacksPublicKeyBuffer;
 
 use util::hash::to_hex;
 use util::hash::Sha512Trunc256Sum;

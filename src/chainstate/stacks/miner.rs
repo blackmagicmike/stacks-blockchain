@@ -37,7 +37,7 @@ use util::hash::MerkleTree;
 use util::hash::Sha512Trunc256Sum;
 use util::secp256k1::{MessageSignature, Secp256k1PrivateKey};
 
-use net::StacksPublicKeyBuffer;
+use crate::types::StacksPublicKeyBuffer;
 
 use chainstate::burn::db::sortdb::{SortitionDB, SortitionDBConn};
 use chainstate::burn::operations::*;
@@ -45,9 +45,9 @@ use chainstate::burn::*;
 
 use chainstate::stacks::db::unconfirmed::UnconfirmedState;
 
+use crate::types::PrivateKey;
+use crate::types::PublicKey;
 use burnchains::BurnchainHeaderHash;
-use burnchains::PrivateKey;
-use burnchains::PublicKey;
 
 use util::vrf::*;
 

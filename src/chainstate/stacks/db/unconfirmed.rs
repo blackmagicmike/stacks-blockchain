@@ -470,7 +470,7 @@ mod test {
 
     use std::fs;
 
-    use burnchains::PublicKey;
+    use crate::types::PublicKey;
 
     use chainstate::stacks::index::marf::*;
     use chainstate::stacks::index::node::*;

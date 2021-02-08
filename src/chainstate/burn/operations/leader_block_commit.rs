@@ -17,38 +17,34 @@
 use std::io::{Read, Write};
 
 use address::AddressHashMode;
-use chainstate::burn::db::sortdb::{SortitionDB, SortitionHandleTx};
-use chainstate::burn::operations::Error as op_error;
-use chainstate::burn::ConsensusHash;
-use chainstate::burn::Opcodes;
-use chainstate::burn::{BlockHeaderHash, SortitionId, VRFSeed};
-
-use chainstate::stacks::index::TrieHash;
-use chainstate::stacks::{StacksAddress, StacksPrivateKey, StacksPublicKey};
-
-use chainstate::burn::operations::{
-    parse_u16_from_be, parse_u32_from_be, BlockstackOperationType, LeaderBlockCommitOp,
-    LeaderKeyRegisterOp, UserBurnSupportOp,
-};
-
 use burnchains::bitcoin::BitcoinNetworkType;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainBlockHeader;
 use burnchains::BurnchainHeaderHash;
+use burnchains::BurnchainTransaction;
 use burnchains::Txid;
 use burnchains::{BurnchainRecipient, BurnchainSigner};
-use burnchains::{BurnchainTransaction, PublicKey};
-
+use chainstate::burn::db::sortdb::{SortitionDB, SortitionHandleTx};
+use chainstate::burn::operations::Error as op_error;
+use chainstate::burn::operations::{
+    parse_u16_from_be, parse_u32_from_be, BlockstackOperationType, LeaderBlockCommitOp,
+    LeaderKeyRegisterOp, UserBurnSupportOp,
+};
+use chainstate::burn::ConsensusHash;
+use chainstate::burn::Opcodes;
+use chainstate::burn::{BlockHeaderHash, SortitionId, VRFSeed};
+use chainstate::stacks::index::storage::TrieFileStorage;
+use chainstate::stacks::index::TrieHash;
+use chainstate::stacks::{StacksAddress, StacksPrivateKey, StacksPublicKey};
 use net::codec::write_next;
 use net::Error as net_error;
 use net::StacksMessageCodec;
-
 use util::hash::to_hex;
 use util::log;
 use util::vrf::{VRFPrivateKey, VRFPublicKey, VRF};
 
-use chainstate::stacks::index::storage::TrieFileStorage;
+use crate::types::PublicKey;
 
 // return type from parse_data below
 struct ParsedData {
@@ -807,32 +803,26 @@ impl LeaderBlockCommitOp {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use address::AddressHashMode;
     use burnchains::bitcoin::address::*;
     use burnchains::bitcoin::blocks::BitcoinBlockParser;
     use burnchains::bitcoin::keys::BitcoinPublicKey;
     use burnchains::bitcoin::*;
     use burnchains::*;
-
-    use address::AddressHashMode;
-
+    use chainstate::burn::db::sortdb::*;
+    use chainstate::burn::db::*;
+    use chainstate::burn::operations::*;
+    use chainstate::burn::*;
+    use chainstate::burn::{BlockHeaderHash, ConsensusHash, VRFSeed};
+    use chainstate::stacks::StacksAddress;
+    use chainstate::stacks::StacksPublicKey;
     use deps::bitcoin::blockdata::transaction::Transaction;
     use deps::bitcoin::network::serialize::{deserialize, serialize_hex};
-
-    use chainstate::burn::{BlockHeaderHash, ConsensusHash, VRFSeed};
-
-    use chainstate::burn::operations::*;
-
     use util::get_epoch_time_secs;
     use util::hash::*;
     use util::vrf::VRFPublicKey;
 
-    use chainstate::stacks::StacksAddress;
-    use chainstate::stacks::StacksPublicKey;
-
-    use chainstate::burn::db::sortdb::*;
-    use chainstate::burn::db::*;
-    use chainstate::burn::*;
+    use super::*;
 
     struct OpFixture {
         txstr: String,

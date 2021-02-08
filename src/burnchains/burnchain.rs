@@ -30,10 +30,10 @@ use std::collections::HashSet;
 use address::public_keys_to_address_hash;
 use address::AddressHashMode;
 
+use crate::types::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainHeaderHash;
-use burnchains::PublicKey;
 use burnchains::Txid;
 use burnchains::{
     BurnchainBlock, BurnchainBlockHeader, BurnchainParameters, BurnchainRecipient, BurnchainSigner,

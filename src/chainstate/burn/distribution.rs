@@ -23,9 +23,9 @@ use chainstate::burn::operations::{
     LeaderKeyRegisterOp, UserBurnSupportOp,
 };
 
+use crate::types::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
-use burnchains::PublicKey;
 use burnchains::Txid;
 use burnchains::{BurnchainRecipient, BurnchainSigner, BurnchainTransaction};
 
@@ -386,10 +386,10 @@ mod tests {
     use core::MINING_COMMITMENT_WINDOW;
     use std::marker::PhantomData;
 
+    use crate::types::PublicKey;
     use burnchains::Address;
     use burnchains::Burnchain;
     use burnchains::BurnchainSigner;
-    use burnchains::PublicKey;
 
     use chainstate::burn::db::sortdb::SortitionId;
     use chainstate::burn::operations::{

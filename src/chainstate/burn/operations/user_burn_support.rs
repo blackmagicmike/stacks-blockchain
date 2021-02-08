@@ -29,12 +29,12 @@ use chainstate::burn::operations::{
     LeaderKeyRegisterOp, UserBurnSupportOp,
 };
 
+use crate::types::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainBlockHeader;
 use burnchains::BurnchainHeaderHash;
 use burnchains::BurnchainTransaction;
-use burnchains::PublicKey;
 use burnchains::Txid;
 
 use net::codec::write_next;

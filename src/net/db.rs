@@ -54,8 +54,8 @@ use net::NeighborKey;
 use net::PeerAddress;
 use net::ServiceFlags;
 
-use burnchains::PrivateKey;
-use burnchains::PublicKey;
+use crate::types::PrivateKey;
+use crate::types::PublicKey;
 
 use core::NETWORK_P2P_PORT;
 

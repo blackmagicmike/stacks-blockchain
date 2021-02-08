@@ -17,7 +17,7 @@
 use std::error;
 use std::fmt;
 
-use burnchains::PublicKey;
+use crate::types::PublicKey;
 
 use deps::bitcoin::blockdata::opcodes::All as btc_opcodes;
 use deps::bitcoin::blockdata::script::{Builder, Instruction, Script};
@@ -193,7 +193,7 @@ pub fn public_keys_to_address_hash<K: PublicKey>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use burnchains::PublicKey;
+    use crate::types::PublicKey;
     use util::hash::*;
     use util::log;
     use util::secp256k1::Secp256k1PublicKey as PubKey;

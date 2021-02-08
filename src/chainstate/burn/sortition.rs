@@ -34,11 +34,11 @@ use chainstate::burn::{BlockHeaderHash, BlockSnapshot};
 use chainstate::stacks::index::MarfTrieId;
 use chainstate::stacks::{db::StacksChainState, StacksBlockId};
 
+use crate::types::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainBlock;
 use burnchains::BurnchainBlockHeader;
-use burnchains::PublicKey;
 
 use util::hash::Hash160;
 use util::uint::BitArray;

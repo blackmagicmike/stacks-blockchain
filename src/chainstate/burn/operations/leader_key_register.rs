@@ -30,12 +30,12 @@ use util::db::DBTx;
 use chainstate::burn::db::sortdb::SortitionHandleTx;
 use chainstate::stacks::index::TrieHash;
 
+use crate::types::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainBlockHeader;
 use burnchains::BurnchainHeaderHash;
 use burnchains::BurnchainTransaction;
-use burnchains::PublicKey;
 use burnchains::Txid;
 
 use address::AddressHashMode;

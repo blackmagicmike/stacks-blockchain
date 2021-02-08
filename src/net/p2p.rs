@@ -75,10 +75,10 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
+use crate::types::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainView;
-use burnchains::PublicKey;
 
 use chainstate::burn::db::sortdb::{BlockHeaderCache, PoxId, SortitionDB, SortitionId};
 

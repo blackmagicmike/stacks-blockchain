@@ -26,9 +26,9 @@ use std::convert::TryInto;
 use std::fmt;
 use std::io::Write;
 
+use crate::types::PublicKey;
 use burnchains::Address;
 use burnchains::BurnchainHeaderHash;
-use burnchains::PublicKey;
 use burnchains::Txid;
 
 use util::hash::{to_hex, Hash160};

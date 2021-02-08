@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
-use super::operations::BurnchainOpSigner;
-
 use stacks::address::AddressHashMode;
-use stacks::burnchains::{BurnchainSigner, PrivateKey};
+use stacks::burnchains::BurnchainSigner;
 use stacks::chainstate::stacks::{
     StacksAddress, StacksPrivateKey, StacksPublicKey, StacksTransactionSigner, TransactionAuth,
 };
+use stacks::types::PrivateKey;
 use stacks::util::hash::{Hash160, Sha256Sum};
 use stacks::util::vrf::{VRFPrivateKey, VRFProof, VRFPublicKey, VRF};
+
+use super::operations::BurnchainOpSigner;
 
 #[derive(Clone)]
 pub struct Keychain {

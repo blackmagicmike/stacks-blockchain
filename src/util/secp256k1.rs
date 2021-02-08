@@ -25,8 +25,8 @@ use secp256k1::Secp256k1;
 use secp256k1::SecretKey as LibSecp256k1PrivateKey;
 use secp256k1::Signature as LibSecp256k1Signature;
 
-use burnchains::PrivateKey;
-use burnchains::PublicKey;
+use crate::types::PrivateKey;
+use crate::types::PublicKey;
 use util::hash::{hex_bytes, to_hex};
 
 use serde::de::Deserialize;
@@ -41,8 +41,6 @@ use rusqlite::Row;
 
 use rand::thread_rng;
 use rand::RngCore;
-
-use chainstate::stacks::StacksPublicKey;
 
 // per-thread Secp256k1 context
 thread_local!(static _secp256k1: Secp256k1<secp256k1::All> = Secp256k1::new());
@@ -444,7 +442,7 @@ mod tests {
     use secp256k1::PublicKey as LibSecp256k1PublicKey;
     use secp256k1::Secp256k1;
 
-    use burnchains::PublicKey;
+    use crate::types::PublicKey;
 
     use util::get_epoch_time_ms;
     use util::log;

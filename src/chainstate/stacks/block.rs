@@ -34,7 +34,7 @@ use util::hash::MerkleTree;
 use util::hash::Sha512Trunc256Sum;
 use util::secp256k1::MessageSignature;
 
-use net::StacksPublicKeyBuffer;
+use crate::types::StacksPublicKeyBuffer;
 
 use sha2::Digest;
 use sha2::Sha512Trunc256;
@@ -44,9 +44,9 @@ use chainstate::burn::ConsensusHash;
 use chainstate::burn::*;
 use chainstate::stacks::Error;
 
+use crate::types::PrivateKey;
+use crate::types::PublicKey;
 use burnchains::BurnchainHeaderHash;
-use burnchains::PrivateKey;
-use burnchains::PublicKey;
 
 use core::*;
 

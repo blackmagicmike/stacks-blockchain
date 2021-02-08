@@ -46,10 +46,10 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::types::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainView;
-use burnchains::PublicKey;
 
 use rand::prelude::*;
 use rand::thread_rng;

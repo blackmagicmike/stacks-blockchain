@@ -19,50 +19,40 @@ use std::convert::TryFrom;
 use std::io;
 use std::io::prelude::*;
 use std::io::Read;
-
-use burnchains::BurnchainHeaderHash;
-use burnchains::BurnchainView;
-use burnchains::PrivateKey;
-use burnchains::PublicKey;
-
-use chainstate::burn::BlockHeaderHash;
-use chainstate::burn::ConsensusHash;
-
-use chainstate::stacks::StacksBlock;
-use chainstate::stacks::StacksBlockHeader;
-use chainstate::stacks::StacksMicroblock;
-use chainstate::stacks::StacksTransaction;
-
-use chainstate::stacks::MAX_BLOCK_LEN;
-
-use chainstate::stacks::StacksPublicKey;
-
-use util::hash::DoubleSha256;
-use util::hash::Hash160;
-use util::hash::MerkleHashFunc;
-use util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
-
-use net::db::LocalPeer;
-use net::Error as net_error;
-use net::*;
-
-use core::PEER_VERSION_TESTNET;
-
-use sha2::Digest;
-use sha2::Sha512Trunc256;
-
-use util::secp256k1::MessageSignature;
-use util::secp256k1::MESSAGE_SIGNATURE_ENCODED_SIZE;
-
-use util::log;
-use util::retry::BoundReader;
-
-use util::hash::to_hex;
+use std::mem;
 
 use rand;
 use rand::Rng;
+use sha2::Digest;
+use sha2::Sha512Trunc256;
 
-use std::mem;
+use crate::types::PrivateKey;
+use crate::types::PublicKey;
+use burnchains::BurnchainHeaderHash;
+use burnchains::BurnchainView;
+use chainstate::burn::BlockHeaderHash;
+use chainstate::burn::ConsensusHash;
+use chainstate::stacks::StacksBlock;
+use chainstate::stacks::StacksBlockHeader;
+use chainstate::stacks::StacksMicroblock;
+use chainstate::stacks::StacksPublicKey;
+use chainstate::stacks::StacksTransaction;
+use chainstate::stacks::MAX_BLOCK_LEN;
+use core::PEER_VERSION_TESTNET;
+use net::db::LocalPeer;
+use net::Error as net_error;
+use net::*;
+use util::hash::to_hex;
+use util::hash::DoubleSha256;
+use util::hash::Hash160;
+use util::hash::MerkleHashFunc;
+use util::log;
+use util::retry::BoundReader;
+use util::secp256k1::MessageSignature;
+use util::secp256k1::MESSAGE_SIGNATURE_ENCODED_SIZE;
+use util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
+
+use crate::types::StacksPublicKeyBuffer;
 
 // macro for determining how big an inv bitvec can be, given its bitlen
 macro_rules! BITVEC_LEN {
@@ -1404,10 +1394,10 @@ impl ProtocolFamily for StacksP2P {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
-
     use util::hash::hex_bytes;
     use util::secp256k1::*;
+
+    use super::*;
 
     fn check_overflow<T>(r: Result<T, net_error>) -> bool {
         match r {

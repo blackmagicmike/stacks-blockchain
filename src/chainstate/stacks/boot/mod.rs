@@ -413,8 +413,8 @@ pub mod test {
     use chainstate::stacks::Error as chainstate_error;
     use chainstate::stacks::*;
 
+    use crate::types::PublicKey;
     use burnchains::Address;
-    use burnchains::PublicKey;
 
     use super::*;
 

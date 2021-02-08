@@ -23,10 +23,10 @@ use net::Error as net_error;
 use net::StacksMessageCodec;
 use net::MAX_MESSAGE_LEN;
 
+use crate::types::PrivateKey;
+use crate::types::PublicKey;
 use address::public_keys_to_address_hash;
 use address::AddressHashMode;
-use burnchains::PrivateKey;
-use burnchains::PublicKey;
 use burnchains::Txid;
 use chainstate::stacks::Error;
 use chainstate::stacks::MultisigHashMode;
@@ -46,8 +46,8 @@ use chainstate::stacks::{
     C32_ADDRESS_VERSION_MAINNET_MULTISIG, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
     C32_ADDRESS_VERSION_TESTNET_MULTISIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
-use net::StacksPublicKeyBuffer;
 use net::STACKS_PUBLIC_KEY_ENCODED_SIZE;
+use types::StacksPublicKeyBuffer;
 use util::hash::to_hex;
 use util::hash::Hash160;
 use util::hash::Sha512Trunc256Sum;
