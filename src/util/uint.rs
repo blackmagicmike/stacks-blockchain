@@ -14,9 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Big unsigned integer types
+//! Big unsigned integer common
 //!
-//! Implementation of a various large-but-fixed sized unsigned integer types.
+//! Implementation of a various large-but-fixed sized unsigned integer common.
 //! The functions here are designed to be fast.
 //!
 /// Borrowed with gratitude from Andrew Poelstra's rust-bitcoin library

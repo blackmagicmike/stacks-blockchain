@@ -413,7 +413,7 @@ fn native_eq(args: Vec<Value>) -> Result<Value> {
         Ok(Value::Bool(true))
     } else {
         let first = &args[0];
-        // check types:
+        // check common:
         let mut arg_type = TypeSignature::type_of(first);
         for x in args.iter() {
             arg_type = TypeSignature::least_supertype(&TypeSignature::type_of(x), &arg_type)?;

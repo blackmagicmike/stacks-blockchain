@@ -14,16 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod address;
-pub mod auth;
-pub mod block;
-pub mod boot;
-pub mod db;
-pub mod events;
-pub mod index;
-pub mod miner;
-pub mod transaction;
-
 use std::convert::From;
 use std::convert::TryFrom;
 use std::error;
@@ -34,7 +24,21 @@ use std::io::{Read, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use rusqlite::Error as RusqliteError;
 use sha2::{Digest, Sha512Trunc256};
+
+use address::AddressHashMode;
+use burnchains::BurnchainHeaderHash;
+use burnchains::Txid;
+use chainstate::burn::operations::LeaderBlockCommitOp;
+use chainstate::burn::{BlockHeaderHash, ConsensusHash};
+use chainstate::stacks::db::accounts::MinerReward;
+use chainstate::stacks::db::blocks::MemPoolRejection;
+use chainstate::stacks::db::StacksHeaderInfo;
+use chainstate::stacks::index::Error as marf_error;
+use chainstate::stacks::index::{TrieHash, TRIEHASH_ENCODED_SIZE};
+use net::Error as net_error;
+use net::MAX_MESSAGE_LEN;
 use util::db::DBConn;
 use util::db::Error as db_error;
 use util::hash::Hash160;
@@ -44,34 +48,25 @@ use util::secp256k1;
 use util::secp256k1::MessageSignature;
 use util::strings::StacksString;
 use util::vrf::VRFProof;
-
-use address::AddressHashMode;
-use burnchains::BurnchainHeaderHash;
-use burnchains::Txid;
-use chainstate::burn::operations::LeaderBlockCommitOp;
-use chainstate::burn::{BlockHeaderHash, ConsensusHash};
-
-use chainstate::stacks::db::accounts::MinerReward;
-use chainstate::stacks::db::StacksHeaderInfo;
-use chainstate::stacks::index::Error as marf_error;
-use chainstate::stacks::index::{TrieHash, TRIEHASH_ENCODED_SIZE};
-
-use chainstate::stacks::db::blocks::MemPoolRejection;
-use net::codec::{read_next, write_next};
-use net::Error as net_error;
-use net::{StacksMessageCodec, MAX_MESSAGE_LEN};
-use rusqlite::Error as RusqliteError;
-
-use vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, Value};
-
-use vm::errors::Error as clarity_interpreter_error;
-
 use vm::clarity::Error as clarity_error;
+use vm::contexts::GlobalContext;
 use vm::costs::CostErrors;
 use vm::costs::ExecutionCost;
+use vm::errors::Error as clarity_interpreter_error;
 use vm::representations::{ClarityName, ContractName};
+use vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, Value};
 
-use vm::contexts::GlobalContext;
+use crate::util::messages::{read_next, write_next, StacksMessageCodec};
+
+pub mod address;
+pub mod auth;
+pub mod block;
+pub mod boot;
+pub mod db;
+pub mod events;
+pub mod index;
+pub mod miner;
+pub mod transaction;
 
 pub type StacksPublicKey = secp256k1::Secp256k1PublicKey;
 pub type StacksPrivateKey = secp256k1::Secp256k1PrivateKey;
@@ -375,7 +370,7 @@ pub enum TransactionAnchorMode {
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Copy, Serialize, Deserialize)]
 pub enum TransactionAuthFlags {
-    // types of auth
+    // common of auth
     AuthStandard = 0x04,
     AuthSponsored = 0x05,
 }
@@ -389,7 +384,7 @@ pub enum TransactionAuthFlags {
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Copy, Serialize, Deserialize)]
 pub enum TransactionAuthFieldID {
-    // types of auth fields
+    // common of auth fields
     PublicKeyCompressed = 0x00,
     PublicKeyUncompressed = 0x01,
     SignatureCompressed = 0x02,
@@ -905,19 +900,17 @@ pub const MAX_MICROBLOCK_SIZE: u32 = 65536;
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
+    use chainstate::stacks::StacksPublicKey as PubKey;
     use chainstate::stacks::*;
     use core::*;
     use net::codec::test::check_codec_and_corruption;
     use net::codec::*;
     use net::*;
-
-    use chainstate::stacks::StacksPublicKey as PubKey;
-
     use util::hash::*;
     use util::log;
-
     use vm::representations::{ClarityName, ContractName};
+
+    use super::*;
 
     /// Make a representative of each kind of transaction we support
     pub fn codec_all_transactions(

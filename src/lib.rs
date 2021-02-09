@@ -87,7 +87,6 @@ pub mod deps;
 pub mod clarity;
 
 pub mod monitoring;
-pub mod types;
 
 // set via _compile-time_ envars
 const GIT_BRANCH: Option<&'static str> = option_env!("GIT_BRANCH");

@@ -51,7 +51,7 @@ use self::bitcoin::{
     BitcoinBlock, BitcoinInputType, BitcoinTransaction, BitcoinTxInput, BitcoinTxOutput,
 };
 
-/// This module contains drivers and types for all burn chains we support.
+/// This module contains drivers and common for all burn chains we support.
 pub mod bitcoin;
 pub mod burnchain;
 pub mod db;
@@ -184,7 +184,7 @@ pub struct BurnchainRecipient {
 #[derive(Debug, PartialEq, Clone)]
 pub enum BurnchainTransaction {
     Bitcoin(BitcoinTransaction),
-    // TODO: fill in more types as we support them
+    // TODO: fill in more common as we support them
 }
 
 impl BurnchainTransaction {
@@ -265,7 +265,7 @@ impl BurnchainTransaction {
 #[derive(Debug, PartialEq, Clone)]
 pub enum BurnchainBlock {
     Bitcoin(BitcoinBlock),
-    // TODO: fill in some more types as we support them
+    // TODO: fill in some more common as we support them
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -578,7 +578,7 @@ pub mod test {
     use util::secp256k1::*;
     use util::vrf::*;
 
-    use crate::types::PrivateKey;
+    use crate::util::secp256k1::PrivateKey;
 
     use super::*;
 

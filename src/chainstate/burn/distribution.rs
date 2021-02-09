@@ -23,7 +23,7 @@ use chainstate::burn::operations::{
     LeaderKeyRegisterOp, UserBurnSupportOp,
 };
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::Txid;
@@ -386,7 +386,7 @@ mod tests {
     use core::MINING_COMMITMENT_WINDOW;
     use std::marker::PhantomData;
 
-    use crate::types::PublicKey;
+    use crate::util::secp256k1::PublicKey;
     use burnchains::Address;
     use burnchains::Burnchain;
     use burnchains::BurnchainSigner;

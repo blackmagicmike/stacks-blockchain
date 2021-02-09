@@ -15,9 +15,9 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use super::StacksAddress;
+use crate::util::messages::StacksMessageCodec;
 use burnchains::Txid;
 use chainstate::stacks::StacksTransaction;
-use net::StacksMessageCodec;
 use vm::analysis::ContractAnalysis;
 use vm::costs::ExecutionCost;
 use vm::types::{

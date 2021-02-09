@@ -39,7 +39,7 @@ use deps::bitcoin::util::hash::Sha256dHash;
 use util::hash::Hash160;
 use util::log;
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 
 /// Parse a script into its structured constituant opcodes and data and collect them
 pub fn parse_script<'a>(script: &'a Script) -> Vec<Instruction<'a>> {

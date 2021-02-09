@@ -28,7 +28,6 @@ use rand;
 use rand::thread_rng;
 use rand::Rng;
 
-use crate::types::PublicKey;
 use burnchains::Burnchain;
 use burnchains::BurnchainView;
 use chainstate::burn::db::sortdb;
@@ -64,7 +63,8 @@ use util::log;
 use util::secp256k1::Secp256k1PrivateKey;
 use util::secp256k1::Secp256k1PublicKey;
 
-use crate::types::StacksPublicKeyBuffer;
+use crate::util::secp256k1::PublicKey;
+use crate::util::secp256k1::StacksPublicKeyBuffer;
 
 // did we or did we not successfully send a message?
 #[derive(Debug, Clone)]
@@ -2321,6 +2321,8 @@ mod test {
     use util::test::*;
     use util::uint::*;
     use vm::costs::ExecutionCost;
+
+    use crate::util::secp256k1::StacksPublicKeyBuffer;
 
     use super::*;
 

@@ -191,7 +191,7 @@ fn test_return_types_must_match() {
     let snippet = "(define-private (mismatched) (begin (unwrap! (ok 1) false) 1))";
     let err = mem_type_check(snippet).unwrap_err();
     assert!(format!("{}", err.diagnostic)
-        .contains("detected two execution paths, returning two different expression types"));
+        .contains("detected two execution paths, returning two different expression common"));
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn test_if_arms_must_match() {
     let snippet = "(if true true 1)";
     let err = mem_type_check(snippet).unwrap_err();
     assert!(format!("{}", err.diagnostic).contains(
-        "expression types returned by the arms of 'if' must match (got 'bool' and 'int')"
+        "expression common returned by the arms of 'if' must match (got 'bool' and 'int')"
     ));
 }
 
@@ -288,7 +288,7 @@ fn test_default_types_must_match() {
     let snippet = "(default-to 1 (some true))";
     let err = mem_type_check(snippet).unwrap_err();
     assert!(format!("{}", err.diagnostic)
-        .contains("expression types passed in 'default-to' must match (got 'int' and 'bool')"));
+        .contains("expression common passed in 'default-to' must match (got 'int' and 'bool')"));
 }
 
 #[test]

@@ -9,7 +9,7 @@ use stacks::chainstate::stacks::{
 };
 use stacks::core;
 use stacks::core::CHAIN_ID_TESTNET;
-use stacks::net::StacksMessageCodec;
+use stacks::util::messages::StacksMessageCodec;
 use stacks::util::secp256k1::Secp256k1PublicKey;
 use stacks::vm::database::ClarityDeserializable;
 use stacks::vm::execute;

@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use rand::thread_rng;
+use rand::RngCore;
+use rusqlite::Row;
 use secp256k1;
 use secp256k1::constants as LibSecp256k1Constants;
 use secp256k1::recovery::RecoverableSignature as LibSecp256k1RecoverableSignature;
@@ -24,23 +27,15 @@ use secp256k1::PublicKey as LibSecp256k1PublicKey;
 use secp256k1::Secp256k1;
 use secp256k1::SecretKey as LibSecp256k1PrivateKey;
 use secp256k1::Signature as LibSecp256k1Signature;
-
-use crate::types::PrivateKey;
-use crate::types::PublicKey;
-use util::hash::{hex_bytes, to_hex};
-
 use serde::de::Deserialize;
 use serde::de::Error as de_Error;
+use serde::export::fmt;
 use serde::ser::Error as ser_Error;
 use serde::Serialize;
 
 use util::db::Error as db_error;
 use util::db::FromColumn;
-
-use rusqlite::Row;
-
-use rand::thread_rng;
-use rand::RngCore;
+use util::hash::{hex_bytes, to_hex};
 
 // per-thread Secp256k1 context
 thread_local!(static _secp256k1: Secp256k1<secp256k1::All> = Secp256k1::new());
@@ -434,18 +429,17 @@ pub fn secp256k1_verify(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use util::hash::hex_bytes;
-
     use secp256k1;
     use secp256k1::PublicKey as LibSecp256k1PublicKey;
     use secp256k1::Secp256k1;
 
-    use crate::types::PublicKey;
-
     use util::get_epoch_time_ms;
+    use util::hash::hex_bytes;
     use util::log;
+
+    use crate::util::secp256k1::PublicKey;
+
+    use super::*;
 
     struct KeyFixture<I, R> {
         input: I,
@@ -688,4 +682,20 @@ mod tests {
             runtime_verify - runtime_recover
         );
     }
+}
+
+/// A container for public keys (compressed secp256k1 public keys)
+pub struct StacksPublicKeyBuffer(pub [u8; 33]);
+impl_array_newtype!(StacksPublicKeyBuffer, u8, 33);
+impl_array_hexstring_fmt!(StacksPublicKeyBuffer);
+impl_byte_array_newtype!(StacksPublicKeyBuffer, u8, 33);
+
+pub trait PublicKey: Clone + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned {
+    fn to_bytes(&self) -> Vec<u8>;
+    fn verify(&self, data_hash: &[u8], sig: &MessageSignature) -> Result<bool, &'static str>;
+}
+
+pub trait PrivateKey: Clone + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned {
+    fn to_bytes(&self) -> Vec<u8>;
+    fn sign(&self, data_hash: &[u8]) -> Result<MessageSignature, &'static str>;
 }

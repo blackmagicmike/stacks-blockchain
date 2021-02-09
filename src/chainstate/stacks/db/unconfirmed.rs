@@ -470,7 +470,7 @@ mod test {
 
     use std::fs;
 
-    use crate::types::PublicKey;
+    use crate::util::secp256k1::PublicKey;
 
     use chainstate::stacks::index::marf::*;
     use chainstate::stacks::index::node::*;

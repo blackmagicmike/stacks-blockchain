@@ -14,35 +14,27 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::convert::TryFrom;
 use std::io;
 use std::io::prelude::*;
 use std::io::{Read, Write};
 
-use std::convert::TryFrom;
-
-use net::codec::{read_next, write_next};
-use net::Error as net_error;
-use net::StacksMessageCodec;
-
 use burnchains::Txid;
-
 use chainstate::stacks::*;
-
 use core::*;
-
-use crate::types::StacksPublicKeyBuffer;
-
+use net::Error as net_error;
 use util::hash::to_hex;
 use util::hash::Sha512Trunc256Sum;
 use util::retry::BoundReader;
 use util::secp256k1::MessageSignature;
 use vm::ast::build_ast;
+use vm::representations::{ClarityName, ContractName};
+use vm::types::serialization::SerializationError as clarity_serialization_error;
 use vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use vm::{SymbolicExpression, SymbolicExpressionType, Value};
 
-use vm::representations::{ClarityName, ContractName};
-
-use vm::types::serialization::SerializationError as clarity_serialization_error;
+use crate::util::messages::{read_next, write_next, StacksMessageCodec};
+use crate::util::secp256k1::StacksPublicKeyBuffer;
 
 impl StacksMessageCodec for Value {
     fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
@@ -1020,24 +1012,22 @@ impl StacksTransactionSigner {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use std::error::Error;
+
     use chainstate::stacks::test::codec_all_transactions;
+    use chainstate::stacks::StacksPublicKey as PubKey;
     use chainstate::stacks::*;
     use net::codec::test::check_codec_and_corruption;
     use net::codec::*;
     use net::*;
-
-    use chainstate::stacks::StacksPublicKey as PubKey;
-
     use util::hash::*;
     use util::log;
     use util::retry::BoundReader;
     use util::retry::LogReader;
-
     use vm::representations::{ClarityName, ContractName};
     use vm::types::{PrincipalData, QualifiedContractIdentifier};
 
-    use std::error::Error;
+    use super::*;
 
     fn corrupt_auth_field(
         corrupt_auth_fields: &TransactionAuth,

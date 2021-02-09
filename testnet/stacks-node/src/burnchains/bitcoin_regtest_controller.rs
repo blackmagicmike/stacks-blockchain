@@ -41,9 +41,9 @@ use stacks::deps::bitcoin::blockdata::transaction::{OutPoint, Transaction, TxIn,
 use stacks::deps::bitcoin::network::encodable::ConsensusEncodable;
 use stacks::deps::bitcoin::network::serialize::RawEncoder;
 use stacks::deps::bitcoin::util::hash::Sha256dHash;
-use stacks::net::StacksMessageCodec;
-use stacks::types::PublicKey;
 use stacks::util::hash::{hex_bytes, Hash160};
+use stacks::util::messages::StacksMessageCodec;
+use stacks::util::secp256k1::PublicKey;
 use stacks::util::secp256k1::Secp256k1PublicKey;
 use stacks::util::sleep_ms;
 use stacks::{

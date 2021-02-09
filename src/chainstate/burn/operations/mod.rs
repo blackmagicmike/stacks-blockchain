@@ -45,7 +45,7 @@ use util::hash::Sha512Trunc256Sum;
 use util::secp256k1::MessageSignature;
 use util::vrf::VRFPublicKey;
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 
 pub mod leader_block_commit;
 /// This module contains all burn-chain operations

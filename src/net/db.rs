@@ -54,8 +54,8 @@ use net::NeighborKey;
 use net::PeerAddress;
 use net::ServiceFlags;
 
-use crate::types::PrivateKey;
-use crate::types::PublicKey;
+use crate::util::secp256k1::PrivateKey;
+use crate::util::secp256k1::PublicKey;
 
 use core::NETWORK_P2P_PORT;
 

@@ -30,7 +30,7 @@ use util::db::DBTx;
 use chainstate::burn::db::sortdb::SortitionHandleTx;
 use chainstate::stacks::index::TrieHash;
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainBlockHeader;
@@ -45,9 +45,9 @@ use chainstate::stacks::StacksAddress;
 use chainstate::stacks::StacksPrivateKey;
 use chainstate::stacks::StacksPublicKey;
 
-use net::codec::write_next;
+use crate::util::messages::write_next;
+use crate::util::messages::StacksMessageCodec;
 use net::Error as net_error;
-use net::StacksMessageCodec;
 
 use util::hash::DoubleSha256;
 use util::log;

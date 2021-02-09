@@ -18,13 +18,6 @@ use std::io;
 use std::io::prelude::*;
 use std::io::{Read, Write};
 
-use net::codec::{read_next, write_next};
-use net::Error as net_error;
-use net::StacksMessageCodec;
-use net::MAX_MESSAGE_LEN;
-
-use crate::types::PrivateKey;
-use crate::types::PublicKey;
 use address::public_keys_to_address_hash;
 use address::AddressHashMode;
 use burnchains::Txid;
@@ -46,8 +39,9 @@ use chainstate::stacks::{
     C32_ADDRESS_VERSION_MAINNET_MULTISIG, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
     C32_ADDRESS_VERSION_TESTNET_MULTISIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
+use net::Error as net_error;
+use net::MAX_MESSAGE_LEN;
 use net::STACKS_PUBLIC_KEY_ENCODED_SIZE;
-use types::StacksPublicKeyBuffer;
 use util::hash::to_hex;
 use util::hash::Hash160;
 use util::hash::Sha512Trunc256Sum;
@@ -55,6 +49,11 @@ use util::retry::BoundReader;
 use util::retry::RetryReader;
 use util::secp256k1::MessageSignature;
 use util::secp256k1::MESSAGE_SIGNATURE_ENCODED_SIZE;
+
+use crate::util::messages::{read_next, write_next, StacksMessageCodec};
+use crate::util::secp256k1::PrivateKey;
+use crate::util::secp256k1::PublicKey;
+use crate::util::secp256k1::StacksPublicKeyBuffer;
 
 impl StacksMessageCodec for TransactionAuthField {
     fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
@@ -1079,12 +1078,13 @@ impl TransactionAuth {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use chainstate::stacks::StacksPublicKey as PubKey;
     use chainstate::stacks::*;
     use net::codec::test::check_codec_and_corruption;
     use net::codec::*;
     use net::*;
+
+    use super::*;
 
     #[test]
     fn tx_stacks_spending_condition_p2pkh() {

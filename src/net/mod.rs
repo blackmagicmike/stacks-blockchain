@@ -77,8 +77,9 @@ use vm::{
     ContractName, Value,
 };
 
-use crate::types::StacksPublicKeyBuffer;
 use crate::util::hash::Sha256Sum;
+use crate::util::messages::StacksMessageCodec;
+use crate::util::secp256k1::StacksPublicKeyBuffer;
 
 use self::dns::*;
 pub use self::http::StacksHttp;
@@ -397,29 +398,6 @@ impl PartialEq for Error {
     }
 }
 
-/// Helper trait for various primitive types that make up Stacks messages
-pub trait StacksMessageCodec {
-    /// serialize implementors _should never_ error unless there is an underlying
-    ///   failure in writing to the `fd`
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), Error>
-    where
-        Self: Sized;
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<Self, Error>
-    where
-        Self: Sized;
-    /// Convenience for serialization to a vec.
-    ///  this function unwraps any underlying serialization error
-    fn serialize_to_vec(&self) -> Vec<u8>
-    where
-        Self: Sized,
-    {
-        let mut bytes = vec![];
-        self.consensus_serialize(&mut bytes)
-            .expect("BUG: serialization to buffer failed.");
-        bytes
-    }
-}
-
 /// A container for an IPv4 or IPv6 address.
 /// Rules:
 /// -- If this is an IPv6 address, the octets are in network byte order
@@ -588,7 +566,7 @@ impl PeerAddress {
 
 pub const STACKS_PUBLIC_KEY_ENCODED_SIZE: u32 = 33;
 
-/// supported HTTP content types
+/// supported HTTP content common
 #[derive(Debug, Clone, PartialEq)]
 pub enum HttpContentType {
     Bytes,
@@ -857,7 +835,7 @@ pub struct RelayData {
 
 pub const RELAY_DATA_ENCODED_SIZE: u32 = NEIGHBOR_ADDRESS_ENCODED_SIZE + 4;
 
-/// All P2P message types
+/// All P2P message common
 #[derive(Debug, Clone, PartialEq)]
 pub enum StacksMessageType {
     Handshake(HandshakeData),
@@ -1308,7 +1286,7 @@ impl From<&HttpRequestType> for HttpResponseMetadata {
     }
 }
 
-/// All data-plane message types a peer can reply with.
+/// All data-plane message common a peer can reply with.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HttpResponseType {
     PeerInfo(HttpResponseMetadata, RPCPeerInfoData),
@@ -1490,7 +1468,7 @@ pub const BLOCKS_PUSHED_MAX: u32 = 32;
 
 macro_rules! impl_byte_array_message_codec {
     ($thing:ident, $len:expr) => {
-        impl ::net::StacksMessageCodec for $thing {
+        impl ::util::messages::StacksMessageCodec for $thing {
             fn consensus_serialize<W: std::io::Write>(
                 &self,
                 fd: &mut W,
@@ -1861,6 +1839,8 @@ pub mod test {
     use vm::costs::ExecutionCost;
     use vm::database::STXBalance;
     use vm::types::*;
+
+    use crate::util::messages::StacksMessageCodec;
 
     use super::*;
 

@@ -112,7 +112,7 @@ macro_rules! type_force_variadic_arithmetic {
     }};
 }
 
-// This macro creates all of the operation functions for the two arithmetic types
+// This macro creates all of the operation functions for the two arithmetic common
 //  (uint128 and int128) -- this is really hard to do generically because there's no
 //  "Integer" trait in rust, so macros were the most straight-forward solution to do this
 //  without a bunch of code duplication

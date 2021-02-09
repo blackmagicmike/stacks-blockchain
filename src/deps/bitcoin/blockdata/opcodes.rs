@@ -23,7 +23,7 @@
 #[cfg(feature = "serde")]
 use serde;
 
-// Heavy stick to translate between opcode types
+// Heavy stick to translate between opcode common
 use std::mem::transmute;
 
 use deps::bitcoin::network::encodable::{ConsensusDecodable, ConsensusEncodable};

@@ -21,6 +21,7 @@ pub mod macros;
 #[macro_use]
 pub mod db;
 pub mod hash;
+pub mod messages;
 pub mod pair;
 pub mod pipe;
 pub mod retry;

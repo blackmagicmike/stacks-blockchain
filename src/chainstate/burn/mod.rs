@@ -26,7 +26,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::io::Write;
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 use burnchains::Address;
 use burnchains::BurnchainHeaderHash;
 use burnchains::Txid;

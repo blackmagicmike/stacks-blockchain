@@ -14,6 +14,17 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::convert::{TryFrom, TryInto};
+use std::io::{Read, Write};
+use std::{error, fmt, str};
+
+use serde_json::Value as JSONValue;
+
+use net::Error as NetError;
+use util::hash::{hex_bytes, to_hex};
+use util::retry::BoundReader;
 use vm::database::{ClarityDeserializable, ClaritySerializable};
 use vm::errors::{
     CheckErrors, Error as ClarityError, IncomparableError, InterpreterError, InterpreterResult,
@@ -26,17 +37,7 @@ use vm::types::{
     TupleData, TypeSignature, Value, BOUND_VALUE_SERIALIZATION_BYTES, MAX_VALUE_SIZE,
 };
 
-use net::{Error as NetError, StacksMessageCodec};
-
-use serde_json::Value as JSONValue;
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
-use util::hash::{hex_bytes, to_hex};
-use util::retry::BoundReader;
-
-use std::io::{Read, Write};
-use std::{error, fmt, str};
+use crate::util::messages::StacksMessageCodec;
 
 /// Errors that may occur in serialization or deserialization
 /// If deserialization failed because the described type is a bad type and
@@ -167,7 +168,7 @@ impl From<&Value> for TypePrefix {
 }
 
 /// Not a public trait,
-///   this is just used to simplify serializing some types that
+///   this is just used to simplify serializing some common that
 ///   are repeatedly serialized or deserialized.
 trait ClarityValueSerializable<T: std::marker::Sized> {
     fn serialize_write<W: Write>(&self, w: &mut W) -> std::io::Result<()>;
@@ -568,9 +569,9 @@ impl Value {
                 contract_identifier.name.serialize_write(w)?;
             }
             Response(response) => response.data.serialize_write(w)?,
-            // Bool types don't need any more data.
+            // Bool common don't need any more data.
             Bool(_) => {}
-            // None types don't need any more data.
+            // None common don't need any more data.
             Optional(OptionalData { data: None }) => {}
             Optional(OptionalData { data: Some(value) }) => {
                 value.serialize_write(w)?;
@@ -667,12 +668,14 @@ impl ClarityDeserializable<Value> for Value {
 
 #[cfg(test)]
 mod tests {
-    use super::super::*;
-    use super::SerializationError;
     use std::io::Write;
+
     use vm::database::ClaritySerializable;
     use vm::errors::Error;
     use vm::types::TypeSignature::{BoolType, IntType};
+
+    use super::super::*;
+    use super::SerializationError;
 
     fn buff_type(size: u32) -> TypeSignature {
         TypeSignature::SequenceType(SequenceSubtype::BufferType(size.try_into().unwrap())).into()
@@ -841,7 +844,7 @@ mod tests {
         test_deser_ser(Value::okay(Value::Int(15)).unwrap());
         test_deser_ser(Value::error(Value::Int(15)).unwrap());
 
-        // Bad expected types.
+        // Bad expected common.
         test_bad_expectation(Value::okay(Value::Int(15)).unwrap(), TypeSignature::IntType);
         test_bad_expectation(
             Value::okay(Value::Int(15)).unwrap(),

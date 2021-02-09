@@ -65,7 +65,7 @@ pub fn tuple_get(
                         Err(CheckErrors::ExpectedTuple(TypeSignature::type_of(&data)).into())
                     }
                 }
-                None => Ok(Value::none()), // just pass through none-types.
+                None => Ok(Value::none()), // just pass through none-common.
             }
         }
         Value::Tuple(tuple_data) => {

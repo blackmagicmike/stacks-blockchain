@@ -39,14 +39,13 @@ use chainstate::stacks::{
 use deps::bitcoin::blockdata::opcodes::All as BtcOp;
 use deps::bitcoin::blockdata::script::Builder as BtcScriptBuilder;
 use deps::bitcoin::blockdata::transaction::TxOut;
-use net::codec::{read_next, write_next};
 use net::Error as net_error;
-use net::StacksMessageCodec;
 use util::hash::Hash160;
 use util::hash::HASH160_ENCODED_SIZE;
 use vm::types::{PrincipalData, StandardPrincipalData};
 
-use crate::types::PublicKey;
+use crate::util::messages::{read_next, write_next, StacksMessageCodec};
+use crate::util::secp256k1::PublicKey;
 
 impl StacksMessageCodec for StacksAddress {
     fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {

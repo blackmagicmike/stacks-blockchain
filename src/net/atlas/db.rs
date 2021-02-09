@@ -22,9 +22,9 @@ use util::secp256k1::Secp256k1PublicKey;
 
 use vm::types::QualifiedContractIdentifier;
 
+use crate::util::messages::StacksMessageCodec;
 use chainstate::burn::{BlockHeaderHash, ConsensusHash};
 use chainstate::stacks::StacksBlockId;
-use net::StacksMessageCodec;
 
 use super::{AtlasConfig, Attachment, AttachmentInstance};
 

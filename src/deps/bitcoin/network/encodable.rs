@@ -12,7 +12,7 @@
 // If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 //
 
-//! Consensus-encodable types
+//! Consensus-encodable common
 //!
 //! This is basically a replacement of the `Encodable` trait which does
 //! normalization for endianness, etc., to ensure that the encoding
@@ -59,7 +59,7 @@ pub struct VarInt(pub u64);
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct CheckedData(pub Vec<u8>);
 
-// Primitive types
+// Primitive common
 macro_rules! impl_int_encodable {
     ($ty:ident, $meth_dec:ident, $meth_enc:ident) => {
         impl<D: SimpleDecoder> ConsensusDecodable<D> for $ty {

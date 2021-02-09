@@ -55,8 +55,8 @@ use blockstack_lib::chainstate::stacks::index::marf::MarfConnection;
 use blockstack_lib::chainstate::stacks::index::marf::MARF;
 use blockstack_lib::chainstate::stacks::StacksBlockHeader;
 use blockstack_lib::chainstate::stacks::*;
-use blockstack_lib::net::StacksMessageCodec;
 use blockstack_lib::util::hash::{hex_bytes, to_hex};
+use blockstack_lib::util::messages::StacksMessageCodec;
 use blockstack_lib::util::retry::LogReader;
 
 use blockstack_lib::burnchains::bitcoin::spv;

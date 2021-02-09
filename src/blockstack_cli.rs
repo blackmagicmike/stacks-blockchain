@@ -21,7 +21,16 @@
 
 extern crate blockstack_lib;
 
+use std::convert::TryFrom;
+use std::io::prelude::*;
+use std::io::Read;
+use std::{env, fs, io};
+
+use blockstack_lib::address::b58;
 use blockstack_lib::address::AddressHashMode;
+use blockstack_lib::burnchains::bitcoin::address::{
+    ADDRESS_VERSION_MAINNET_SINGLESIG, ADDRESS_VERSION_TESTNET_SINGLESIG,
+};
 use blockstack_lib::burnchains::Address;
 use blockstack_lib::chainstate::stacks::{
     StacksAddress, StacksBlock, StacksMicroblock, StacksPrivateKey, StacksPublicKey,
@@ -31,7 +40,8 @@ use blockstack_lib::chainstate::stacks::{
     C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
 use blockstack_lib::core::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
-use blockstack_lib::net::{Error as NetError, StacksMessageCodec};
+use blockstack_lib::net::Error as NetError;
+use blockstack_lib::util::messages::StacksMessageCodec;
 use blockstack_lib::util::{
     hash::hex_bytes, hash::to_hex, log, retry::LogReader, strings::StacksString,
 };
@@ -40,15 +50,6 @@ use blockstack_lib::vm::{
     errors::{Error as ClarityError, RuntimeErrorType},
     types::PrincipalData,
     ClarityName, ContractName, Value,
-};
-use std::convert::TryFrom;
-use std::io::prelude::*;
-use std::io::Read;
-use std::{env, fs, io};
-
-use blockstack_lib::address::b58;
-use blockstack_lib::burnchains::bitcoin::address::{
-    ADDRESS_VERSION_MAINNET_SINGLESIG, ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
 
 const USAGE: &str = "blockstack-cli (options) [method] [args...]
@@ -779,6 +780,7 @@ fn main_handler(mut argv: Vec<String>) -> Result<String, CliError> {
 #[cfg(test)]
 mod test {
     use super::*;
+
     #[test]
     fn generate_should_work() {
         assert!(main_handler(vec!["generate-sk".into(), "--testnet".into()]).is_ok());

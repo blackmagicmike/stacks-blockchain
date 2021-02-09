@@ -75,7 +75,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainView;

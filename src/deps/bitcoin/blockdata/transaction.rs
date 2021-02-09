@@ -451,7 +451,7 @@ impl<D: SimpleDecoder> ConsensusDecodable<D> for Transaction {
 }
 
 /// Hashtype of a transaction, encoded in the last byte of a signature
-/// Fixed values so they can be casted as integer types for encoding
+/// Fixed values so they can be casted as integer common for encoding
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum SigHashType {
     /// 0x1: Sign all outputs

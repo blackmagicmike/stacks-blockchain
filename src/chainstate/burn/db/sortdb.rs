@@ -78,7 +78,7 @@ use util::vrf::*;
 use vm::representations::{ClarityName, ContractName};
 use vm::types::Value;
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 
 const BLOCK_HEIGHT_MAX: u64 = ((1 as u64) << 63) - 1;
 

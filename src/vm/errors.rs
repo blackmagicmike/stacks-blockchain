@@ -75,7 +75,7 @@ pub enum RuntimeErrorType {
     SupplyOverflow(u128, u128),
     SupplyUnderflow(u128, u128),
     DivisionByZero,
-    // error in parsing types
+    // error in parsing common
     ParseError(String),
     // error in parsing the AST
     ASTError(ParseError),

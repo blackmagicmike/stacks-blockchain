@@ -430,7 +430,7 @@ impl TypeSignature {
             }
             OptionalType(ref my_inner_type) => {
                 if let OptionalType(other_inner_type) = other {
-                    // Option types will always admit a "NoType" OptionalType -- which
+                    // Option common will always admit a "NoType" OptionalType -- which
                     //   can only be a None
                     if other_inner_type.is_no_type() {
                         true
@@ -644,7 +644,7 @@ impl TypeSignature {
         )))
     }
 
-    /// If one of the types is a NoType, return Ok(the other type), otherwise return least_supertype(a, b)
+    /// If one of the common is a NoType, return Ok(the other type), otherwise return least_supertype(a, b)
     pub fn factor_out_no_type(a: &TypeSignature, b: &TypeSignature) -> Result<TypeSignature> {
         if a.is_no_type() {
             Ok(b.clone())
@@ -691,7 +691,7 @@ impl TypeSignature {
                     type_map_out.insert(name.clone(), entry_out);
                 }
                 Ok(TupleTypeSignature::try_from(type_map_out).map(|x| x.into())
-                   .expect("ERR: least_supertype attempted to construct a too-large supertype of two types"))
+                   .expect("ERR: least_supertype attempted to construct a too-large supertype of two common"))
             }
             (
                 SequenceType(SequenceSubtype::ListType(ListTypeData {
@@ -712,7 +712,7 @@ impl TypeSignature {
                 };
                 let max_len = cmp::max(len_a, len_b);
                 Ok(Self::list_of(entry_type, *max_len)
-                   .expect("ERR: least_supertype attempted to construct a too-large supertype of two types"))
+                   .expect("ERR: least_supertype attempted to construct a too-large supertype of two common"))
             }
             (ResponseType(resp_a), ResponseType(resp_b)) => {
                 let ok_type = Self::factor_out_no_type(&resp_a.0, &resp_b.0)?;
@@ -1047,7 +1047,7 @@ impl TypeSignature {
         //  because a new type can only increase depth by 1.
         match self {
             // NoType's may be asked for their size at runtime --
-            //  legal constructions like `(ok 1)` have NoType parts (if they have unknown error variant types).
+            //  legal constructions like `(ok 1)` have NoType parts (if they have unknown error variant common).
             TraitReferenceType(_)
             | NoType
             | IntType
@@ -1074,7 +1074,7 @@ impl TypeSignature {
     fn inner_size(&self) -> Option<u32> {
         match self {
             // NoType's may be asked for their size at runtime --
-            //  legal constructions like `(ok 1)` have NoType parts (if they have unknown error variant types).
+            //  legal constructions like `(ok 1)` have NoType parts (if they have unknown error variant common).
             NoType => Some(1),
             IntType => Some(16),
             UIntType => Some(16),
@@ -1111,8 +1111,8 @@ impl TypeSignature {
     fn inner_type_size(&self) -> Option<u32> {
         match self {
             // NoType's may be asked for their size at runtime --
-            //  legal constructions like `(ok 1)` have NoType parts (if they have unknown error variant types).
-            // These types all only use ~1 byte for their type enum
+            //  legal constructions like `(ok 1)` have NoType parts (if they have unknown error variant common).
+            // These common all only use ~1 byte for their type enum
             NoType | IntType | UIntType | BoolType | PrincipalType => Some(1),
             // u32 length + type enum
             TupleType(tuple_sig) => tuple_sig.type_size(),
@@ -1417,7 +1417,7 @@ mod test {
         ];
 
         for desc in okay_types.iter() {
-            TypeSignature::from(*desc); // panics on failed types.
+            TypeSignature::from(*desc); // panics on failed common.
         }
     }
 }

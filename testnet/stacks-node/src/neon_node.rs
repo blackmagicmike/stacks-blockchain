@@ -1,16 +1,14 @@
-use super::{BurnchainController, BurnchainTip, Config, EventDispatcher, Keychain};
-use crate::config::HELIUM_BLOCK_LIMIT;
-use crate::run_loop::RegisteredKey;
-use std::collections::HashMap;
-
 use std::cmp;
+use std::collections::HashMap;
 use std::collections::{HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::default::Default;
 use std::net::SocketAddr;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::{thread, thread::JoinHandle};
 
+use stacks::burnchains::BurnchainSigner;
 use stacks::burnchains::{Burnchain, BurnchainHeaderHash, BurnchainParameters, Txid};
 use stacks::chainstate::burn::db::sortdb::{SortitionDB, SortitionId};
 use stacks::chainstate::burn::operations::{
@@ -19,6 +17,8 @@ use stacks::chainstate::burn::operations::{
 };
 use stacks::chainstate::burn::BlockSnapshot;
 use stacks::chainstate::burn::{BlockHeaderHash, ConsensusHash, VRFSeed};
+use stacks::chainstate::coordinator::comm::CoordinatorChannels;
+use stacks::chainstate::coordinator::{get_next_recipients, OnChainRewardSetProvider};
 use stacks::chainstate::stacks::db::unconfirmed::UnconfirmedTxMap;
 use stacks::chainstate::stacks::db::{
     ChainStateBootData, ClarityTx, StacksChainState, MINER_REWARD_MATURITY,
@@ -32,6 +32,8 @@ use stacks::chainstate::stacks::{
     TransactionVersion,
 };
 use stacks::core::mempool::MemPoolDB;
+use stacks::core::FIRST_BURNCHAIN_CONSENSUS_HASH;
+use stacks::monitoring::{increment_stx_blocks_mined_counter, update_active_miners_count_gauge};
 use stacks::net::{
     atlas::{AtlasConfig, AtlasDB, AttachmentInstance},
     db::{LocalPeer, PeerDB},
@@ -39,27 +41,23 @@ use stacks::net::{
     p2p::PeerNetwork,
     relay::Relayer,
     rpc::RPCHandlerArgs,
-    Error as NetError, NetworkResult, PeerAddress, StacksMessageCodec,
+    Error as NetError, NetworkResult, PeerAddress,
 };
 use stacks::util::get_epoch_time_ms;
 use stacks::util::get_epoch_time_secs;
 use stacks::util::hash::{to_hex, Hash160, Sha256Sum};
+use stacks::util::messages::StacksMessageCodec;
 use stacks::util::secp256k1::Secp256k1PrivateKey;
 use stacks::util::strings::{UrlString, VecDisplay};
 use stacks::util::vrf::VRFPublicKey;
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 
 use crate::burnchains::bitcoin_regtest_controller::BitcoinRegtestController;
+use crate::config::HELIUM_BLOCK_LIMIT;
+use crate::run_loop::RegisteredKey;
 use crate::syncctl::PoxSyncWatchdogComms;
-
 use crate::ChainTip;
-use stacks::burnchains::BurnchainSigner;
-use stacks::core::FIRST_BURNCHAIN_CONSENSUS_HASH;
 
-use stacks::chainstate::coordinator::comm::CoordinatorChannels;
-use stacks::chainstate::coordinator::{get_next_recipients, OnChainRewardSetProvider};
-
-use stacks::monitoring::{increment_stx_blocks_mined_counter, update_active_miners_count_gauge};
+use super::{BurnchainController, BurnchainTip, Config, EventDispatcher, Keychain};
 
 pub const RELAYER_MAX_BUFFER: usize = 100;
 

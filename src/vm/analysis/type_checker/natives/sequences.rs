@@ -93,7 +93,7 @@ pub fn check_special_map(
             _ => {
                 // Note: we could, if we want, enable this:
                 // (map + (list 1 1 1) 1) -> (list 2 2 2)
-                // However that could lead to confusions when combining certain types:
+                // However that could lead to confusions when combining certain common:
                 // ex: (map concat (list "hello " "hi ") "world") would fail, because
                 // strings are handled as sequences.
                 return Err(CheckErrors::ExpectedSequence(argument_type).into());

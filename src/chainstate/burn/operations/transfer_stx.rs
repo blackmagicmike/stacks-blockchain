@@ -16,6 +16,8 @@
 
 use std::io::{Read, Write};
 
+use crate::util::messages::write_next;
+use crate::util::messages::StacksMessageCodec;
 use address::AddressHashMode;
 use burnchains::Address;
 use burnchains::Burnchain;
@@ -34,14 +36,12 @@ use chainstate::stacks::index::storage::TrieFileStorage;
 use chainstate::stacks::index::TrieHash;
 use chainstate::stacks::{StacksAddress, StacksPrivateKey, StacksPublicKey};
 use core::POX_MAX_NUM_CYCLES;
-use net::codec::write_next;
 use net::Error as net_error;
-use net::StacksMessageCodec;
 use util::hash::to_hex;
 use util::log;
 use util::vrf::{VRFPrivateKey, VRFPublicKey, VRF};
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 
 // return type from parse_data below
 struct ParsedData {

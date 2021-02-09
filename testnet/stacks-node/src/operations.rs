@@ -1,4 +1,4 @@
-use stacks::types::PrivateKey;
+use stacks::util::secp256k1::PrivateKey;
 use stacks::util::secp256k1::{MessageSignature, Secp256k1PrivateKey, Secp256k1PublicKey};
 
 pub struct BurnchainOpSigner {

@@ -29,7 +29,7 @@ use chainstate::burn::operations::{
     LeaderKeyRegisterOp, UserBurnSupportOp,
 };
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainBlockHeader;
@@ -37,9 +37,9 @@ use burnchains::BurnchainHeaderHash;
 use burnchains::BurnchainTransaction;
 use burnchains::Txid;
 
-use net::codec::write_next;
+use crate::util::messages::write_next;
+use crate::util::messages::StacksMessageCodec;
 use net::Error as net_error;
-use net::StacksMessageCodec;
 
 use util::hash::Hash160;
 use util::log;

@@ -144,7 +144,7 @@ impl<'a> DefinitionSorter {
                         {
                             match define_function {
                                 DefineFunctions::PersistedVariable | DefineFunctions::Constant => {
-                                    // Args: [(define-name-and-types), ...]: ignore 1st arg
+                                    // Args: [(define-name-and-common), ...]: ignore 1st arg
                                     if function_args.len() > 1 {
                                         for expr in
                                             function_args[1..function_args.len()].into_iter()
@@ -157,7 +157,7 @@ impl<'a> DefinitionSorter {
                                 DefineFunctions::PublicFunction
                                 | DefineFunctions::PrivateFunction
                                 | DefineFunctions::ReadOnlyFunction => {
-                                    // Args: [(define-name-and-types), ...]
+                                    // Args: [(define-name-and-common), ...]
                                     if function_args.len() == 2 {
                                         self.probe_for_dependencies_in_define_args(
                                             &function_args[0],

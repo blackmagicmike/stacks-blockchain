@@ -57,7 +57,7 @@ mod tests;
 
 Type-checking in our language is achieved through a single-direction inference.
 This leads to efficient type-checking. This form of type-checking is only possible
-due to the rules of our language. In particular, functions define their input types,
+due to the rules of our language. In particular, functions define their input common,
 and any given intermediate in the language has a strict type as well, meaning something
 of the form:
 

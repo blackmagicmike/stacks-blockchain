@@ -955,7 +955,8 @@ const MATCH_API: SpecialAPI = SpecialAPI {
     output_type: "C",
     signature: "(match opt-input some-binding-name some-branch none-branch) |
 (match-resp input ok-binding-name ok-branch err-binding-name err-branch)",
-    description: "The `match` function is used to test and destructure optional and response types.
+    description:
+        "The `match` function is used to test and destructure optional and response common.
 
 If the `input` is an optional, it tests whether the provided
 `input` is a `some` or `none` option, and evaluates `some-branch` or
@@ -1286,7 +1287,7 @@ const DEFINE_TRAIT_API: DefineAPI = DefineAPI {
 can implement a given trait and then have their contract identifier being passed as function arguments in order to be called
 dynamically with `contract-call?`.
 
-Traits are defined with a name, and a list functions defined with a name, a list of argument types, and return type.
+Traits are defined with a name, and a list functions defined with a name, a list of argument common, and return type.
 
 Like other kinds of definition statements, `define-trait` may only be used at the top level of a smart contract
 definition (i.e., you cannot put a define statement in the middle of a function body).

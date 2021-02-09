@@ -30,7 +30,7 @@ use std::collections::HashSet;
 use address::public_keys_to_address_hash;
 use address::AddressHashMode;
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainHeaderHash;

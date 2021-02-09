@@ -5,8 +5,8 @@ use stacks::burnchains::BurnchainSigner;
 use stacks::chainstate::stacks::{
     StacksAddress, StacksPrivateKey, StacksPublicKey, StacksTransactionSigner, TransactionAuth,
 };
-use stacks::types::PrivateKey;
 use stacks::util::hash::{Hash160, Sha256Sum};
+use stacks::util::secp256k1::PrivateKey;
 use stacks::util::vrf::{VRFPrivateKey, VRFProof, VRFPublicKey, VRF};
 
 use super::operations::BurnchainOpSigner;

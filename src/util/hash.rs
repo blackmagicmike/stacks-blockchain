@@ -30,7 +30,7 @@ use sha3::Keccak256;
 
 use util::uint::Uint256;
 
-use crate::types::StacksPublicKeyBuffer;
+use crate::util::secp256k1::StacksPublicKeyBuffer;
 
 use serde::de::Deserialize;
 use serde::de::Error as de_Error;

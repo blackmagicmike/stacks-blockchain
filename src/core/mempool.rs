@@ -14,32 +14,32 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::cmp;
+use std::fs;
+use std::io::Read;
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::path::{Path, PathBuf};
+
 use rusqlite::types::ToSql;
 use rusqlite::Connection;
+use rusqlite::Error as SqliteError;
 use rusqlite::OpenFlags;
 use rusqlite::OptionalExtension;
 use rusqlite::Row;
 use rusqlite::Transaction;
 use rusqlite::NO_PARAMS;
 
-use std::cmp;
-use std::ops::Deref;
-use std::ops::DerefMut;
-
 use burnchains::Txid;
-use chainstate::burn::ConsensusHash;
-
-use net::StacksMessageCodec;
-
 use chainstate::burn::BlockHeaderHash;
+use chainstate::burn::ConsensusHash;
+use chainstate::stacks::TransactionPayload;
 use chainstate::stacks::{
     db::blocks::MemPoolRejection, db::StacksChainState, index::Error as MarfError,
     Error as ChainstateError, StacksAddress, StacksBlockHeader, StacksTransaction,
 };
-use std::fs;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-
+use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
+use core::FIRST_STACKS_BLOCK_HASH;
 use util::db::query_row;
 use util::db::query_rows;
 use util::db::tx_begin_immediate;
@@ -49,14 +49,9 @@ use util::db::Error as db_error;
 use util::db::FromColumn;
 use util::db::{sql_pragma, DBConn, DBTx, FromRow};
 use util::get_epoch_time_secs;
-
-use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
-use core::FIRST_STACKS_BLOCK_HASH;
-
-use rusqlite::Error as SqliteError;
-
-use chainstate::stacks::TransactionPayload;
 use vm::types::PrincipalData;
+
+use crate::util::messages::StacksMessageCodec;
 
 // maximum number of confirmations a transaction can have before it's garbage-collected
 pub const MEMPOOL_MAX_TRANSACTION_AGE: u64 = 256;
@@ -1088,11 +1083,27 @@ impl MemPoolDB {
 
 #[cfg(test)]
 mod tests {
-
     use address::AddressHashMode;
     use burnchains::Address;
+    use chainstate::burn::ConsensusHash;
     use chainstate::burn::{BlockHeaderHash, VRFSeed};
-    use net::{Error as NetError, StacksMessageCodec};
+    use chainstate::stacks::db::test::chainstate_path;
+    use chainstate::stacks::db::test::instantiate_chainstate;
+    use chainstate::stacks::db::test::instantiate_chainstate_with_balances;
+    use chainstate::stacks::test::codec_all_transactions;
+    use chainstate::stacks::{
+        db::blocks::MemPoolRejection, db::StacksChainState, index::MarfTrieId, CoinbasePayload,
+        Error as ChainstateError, StacksAddress, StacksBlockHeader, StacksMicroblockHeader,
+        StacksPrivateKey, StacksPublicKey, StacksTransaction, StacksTransactionSigner,
+        TokenTransferMemo, TransactionAnchorMode, TransactionAuth, TransactionContractCall,
+        TransactionPayload, TransactionPostConditionMode, TransactionSmartContract,
+        TransactionSpendingCondition, TransactionVersion, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
+        C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
+    };
+    use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
+    use core::FIRST_STACKS_BLOCK_HASH;
+    use net::Error as NetError;
+    use util::db::{DBConn, FromRow};
     use util::{hash::hex_bytes, hash::to_hex, hash::*, log, secp256k1::*, strings::StacksString};
     use vm::{
         database::HeadersDB,
@@ -1103,16 +1114,7 @@ mod tests {
         ClarityName, ContractName, Value,
     };
 
-    use chainstate::stacks::{
-        db::blocks::MemPoolRejection, db::StacksChainState, index::MarfTrieId, CoinbasePayload,
-        Error as ChainstateError, StacksAddress, StacksBlockHeader, StacksMicroblockHeader,
-        StacksPrivateKey, StacksPublicKey, StacksTransaction, StacksTransactionSigner,
-        TokenTransferMemo, TransactionAnchorMode, TransactionAuth, TransactionContractCall,
-        TransactionPayload, TransactionPostConditionMode, TransactionSmartContract,
-        TransactionSpendingCondition, TransactionVersion, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
-        C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
-    };
-
+    use crate::util::messages::StacksMessageCodec;
     use crate::{
         burnchains::BurnchainHeaderHash,
         chainstate::stacks::{
@@ -1123,15 +1125,6 @@ mod tests {
     };
 
     use super::MemPoolDB;
-    use util::db::{DBConn, FromRow};
-
-    use chainstate::burn::ConsensusHash;
-    use chainstate::stacks::db::test::chainstate_path;
-    use chainstate::stacks::db::test::instantiate_chainstate;
-    use chainstate::stacks::db::test::instantiate_chainstate_with_balances;
-    use chainstate::stacks::test::codec_all_transactions;
-    use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
-    use core::FIRST_STACKS_BLOCK_HASH;
 
     const FOO_CONTRACT: &'static str = "(define-public (foo) (ok 1))
                                         (define-public (bar (x uint)) (ok x))";

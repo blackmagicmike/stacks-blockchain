@@ -260,7 +260,7 @@ impl ContractInterfaceFunction {
                             ContractInterfaceAtomType::from_type_signature(&returns)
                         }
                         _ => panic!(
-                            "Contract functions should only have fixed function return types!"
+                            "Contract functions should only have fixed function return common!"
                         ),
                     },
                 },

@@ -34,7 +34,7 @@ use chainstate::burn::{BlockHeaderHash, BlockSnapshot};
 use chainstate::stacks::index::MarfTrieId;
 use chainstate::stacks::{db::StacksChainState, StacksBlockId};
 
-use crate::types::PublicKey;
+use crate::util::secp256k1::PublicKey;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainBlock;
