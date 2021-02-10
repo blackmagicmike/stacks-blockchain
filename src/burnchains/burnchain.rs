@@ -1493,7 +1493,7 @@ pub mod tests {
     use crate::util::errors::DBError as db_error;
     use util::hash::to_hex;
     use util::hash::Hash160;
-    use util::secp256k1::Secp256k1PrivateKey;
+    use util::secp256k1::{PublicKey, Secp256k1PrivateKey};
     use util::uint::BitArray;
     use util::uint::Uint256;
     use util::uint::Uint512;

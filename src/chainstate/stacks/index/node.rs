@@ -25,7 +25,7 @@ use std::ops::{Deref, DerefMut};
 
 use sha2::Digest;
 
-use crate::util::errors::MarfError;
+use crate::util::errors::{CursorError, MarfError};
 use crate::util::messages::read_next;
 use chainstate::burn::{BlockHeaderHash, BLOCK_HEADER_HASH_ENCODED_SIZE};
 use chainstate::stacks::index::bits::{
@@ -39,29 +39,6 @@ use util::hash::to_hex;
 use util::log;
 
 use crate::util::messages::StacksMessageCodec;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CursorError {
-    PathDiverged,
-    BackptrEncountered(TriePtr),
-    ChrNotFound,
-}
-
-impl fmt::Display for CursorError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            CursorError::PathDiverged => write!(f, "Path diverged"),
-            CursorError::BackptrEncountered(_) => write!(f, "Back-pointer encountered"),
-            CursorError::ChrNotFound => write!(f, "Node child not found"),
-        }
-    }
-}
-
-impl error::Error for CursorError {
-    fn cause(&self) -> Option<&dyn error::Error> {
-        None
-    }
-}
 
 // All numeric values of a Trie node when encoded.
 // They are all 7-bit numbers -- the 8th bit is used to indicate whether or not the value

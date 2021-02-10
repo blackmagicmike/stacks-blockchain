@@ -33,9 +33,11 @@ use serde::export::fmt;
 use serde::ser::Error as ser_Error;
 use serde::Serialize;
 
-use crate::util::errors::DBError as db_error;
 use util::db::FromColumn;
+use util::errors::NetworkError;
 use util::hash::{hex_bytes, to_hex};
+
+use crate::util::errors::DBError as db_error;
 
 // per-thread Secp256k1 context
 thread_local!(static _secp256k1: Secp256k1<secp256k1::All> = Secp256k1::new());
@@ -698,4 +700,19 @@ pub trait PublicKey: Clone + fmt::Debug + serde::Serialize + serde::de::Deserial
 pub trait PrivateKey: Clone + fmt::Debug + serde::Serialize + serde::de::DeserializeOwned {
     fn to_bytes(&self) -> Vec<u8>;
     fn sign(&self, data_hash: &[u8]) -> Result<MessageSignature, &'static str>;
+}
+
+impl StacksPublicKeyBuffer {
+    pub fn from_public_key(pubkey: &Secp256k1PublicKey) -> StacksPublicKeyBuffer {
+        let pubkey_bytes_vec = pubkey.to_bytes_compressed();
+        let mut pubkey_bytes = [0u8; 33];
+        pubkey_bytes.copy_from_slice(&pubkey_bytes_vec[..]);
+        StacksPublicKeyBuffer(pubkey_bytes)
+    }
+
+    pub fn to_public_key(&self) -> Result<Secp256k1PublicKey, NetworkError> {
+        Secp256k1PublicKey::from_slice(&self.0).map_err(|_e_str| {
+            NetworkError::DeserializeError("Failed to decode Stacks public key".to_string())
+        })
+    }
 }

@@ -27,6 +27,45 @@ pub trait StacksMessageCodec {
         bytes
     }
 }
+macro_rules! impl_stacks_message_codec_for_int {
+    ($typ:ty; $array:expr) => {
+        impl StacksMessageCodec for $typ {
+            fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
+                fd.write_all(&self.to_be_bytes())
+                    .map_err(NetworkError::WriteError)
+            }
+            fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<Self, NetworkError> {
+                let mut buf = $array;
+                fd.read_exact(&mut buf).map_err(NetworkError::ReadError)?;
+                Ok(<$typ>::from_be_bytes(buf))
+            }
+        }
+    };
+}
+
+impl_stacks_message_codec_for_int!(u8; [0; 1]);
+impl_stacks_message_codec_for_int!(u16; [0; 2]);
+impl_stacks_message_codec_for_int!(u32; [0; 4]);
+impl_stacks_message_codec_for_int!(u64; [0; 8]);
+impl_stacks_message_codec_for_int!(i64; [0; 8]);
+
+impl<T> StacksMessageCodec for Vec<T>
+where
+    T: StacksMessageCodec + Sized,
+{
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
+        let len = self.len() as u32;
+        write_next(fd, &len)?;
+        for i in 0..self.len() {
+            write_next(fd, &self[i])?;
+        }
+        Ok(())
+    }
+
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<Vec<T>, NetworkError> {
+        read_next_at_most::<R, T>(fd, u32::max_value())
+    }
+}
 
 pub fn write_next<T: StacksMessageCodec, W: Write>(
     fd: &mut W,

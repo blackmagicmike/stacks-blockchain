@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use sha2::Digest;
 use sha2::Sha512Trunc256 as TrieHasher;
 
-use crate::util::errors::MarfError;
+use crate::util::errors::{CursorError, MarfError};
 use crate::util::messages::read_next;
 use chainstate::burn::{BlockHeaderHash, BLOCK_HEADER_HASH_ENCODED_SIZE};
 use chainstate::stacks::index::bits::{
@@ -36,9 +36,8 @@ use chainstate::stacks::index::bits::{
 };
 use chainstate::stacks::index::marf::MARF;
 use chainstate::stacks::index::node::{
-    clear_backptr, is_backptr, set_backptr, ConsensusSerializable, CursorError, TrieCursor,
-    TrieLeaf, TrieNode, TrieNode16, TrieNode256, TrieNode4, TrieNode48, TrieNodeID, TrieNodeType,
-    TriePath, TriePtr,
+    clear_backptr, is_backptr, set_backptr, ConsensusSerializable, TrieCursor, TrieLeaf, TrieNode,
+    TrieNode16, TrieNode256, TrieNode4, TrieNode48, TrieNodeID, TrieNodeType, TriePath, TriePtr,
 };
 use chainstate::stacks::index::storage::{TrieFileStorage, TrieStorageConnection};
 use chainstate::stacks::index::trie::Trie;

@@ -49,7 +49,7 @@ use util::secp256k1::MessageSignature;
 use util::secp256k1::MESSAGE_SIGNATURE_ENCODED_SIZE;
 use util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
 
-use crate::util::errors::{NetworkError as net_error, NetworkError};
+use crate::util::errors::NetworkError;
 use crate::util::messages;
 use crate::util::messages::StacksMessageCodec;
 use crate::util::secp256k1::StacksPublicKeyBuffer;
@@ -60,61 +60,6 @@ macro_rules! BITVEC_LEN {
     ($bitvec:expr) => {
         (($bitvec) / 8 + if ($bitvec) % 8 > 0 { 1 } else { 0 }) as u32
     };
-}
-
-macro_rules! impl_stacks_message_codec_for_int {
-    ($typ:ty; $array:expr) => {
-        impl StacksMessageCodec for $typ {
-            fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
-                fd.write_all(&self.to_be_bytes())
-                    .map_err(net_error::WriteError)
-            }
-            fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<Self, net_error> {
-                let mut buf = $array;
-                fd.read_exact(&mut buf).map_err(net_error::ReadError)?;
-                Ok(<$typ>::from_be_bytes(buf))
-            }
-        }
-    };
-}
-
-impl_stacks_message_codec_for_int!(u8; [0; 1]);
-impl_stacks_message_codec_for_int!(u16; [0; 2]);
-impl_stacks_message_codec_for_int!(u32; [0; 4]);
-impl_stacks_message_codec_for_int!(u64; [0; 8]);
-impl_stacks_message_codec_for_int!(i64; [0; 8]);
-
-impl StacksPublicKeyBuffer {
-    pub fn from_public_key(pubkey: &Secp256k1PublicKey) -> StacksPublicKeyBuffer {
-        let pubkey_bytes_vec = pubkey.to_bytes_compressed();
-        let mut pubkey_bytes = [0u8; 33];
-        pubkey_bytes.copy_from_slice(&pubkey_bytes_vec[..]);
-        StacksPublicKeyBuffer(pubkey_bytes)
-    }
-
-    pub fn to_public_key(&self) -> Result<Secp256k1PublicKey, net_error> {
-        Secp256k1PublicKey::from_slice(&self.0).map_err(|_e_str| {
-            net_error::DeserializeError("Failed to decode Stacks public key".to_string())
-        })
-    }
-}
-
-impl<T> StacksMessageCodec for Vec<T>
-where
-    T: StacksMessageCodec + Sized,
-{
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
-        let len = self.len() as u32;
-        messages::write_next(fd, &len)?;
-        for i in 0..self.len() {
-            messages::write_next(fd, &self[i])?;
-        }
-        Ok(())
-    }
-
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<Vec<T>, net_error> {
-        messages::read_next_at_most::<R, T>(fd, u32::max_value())
-    }
 }
 
 impl Preamble {
@@ -148,7 +93,7 @@ impl Preamble {
         &mut self,
         message_bits: &[u8],
         privkey: &Secp256k1PrivateKey,
-    ) -> Result<(), net_error> {
+    ) -> Result<(), NetworkError> {
         let mut digest_bits = [0u8; 32];
         let mut sha2 = Sha512Trunc256::new();
 
@@ -167,7 +112,7 @@ impl Preamble {
 
         let sig = privkey
             .sign(&digest_bits)
-            .map_err(|se| net_error::SigningError(se.to_string()))?;
+            .map_err(|se| NetworkError::SigningError(se.to_string()))?;
 
         self.signature = sig;
         Ok(())
@@ -179,7 +124,7 @@ impl Preamble {
         &mut self,
         message_bits: &[u8],
         pubkey: &Secp256k1PublicKey,
-    ) -> Result<(), net_error> {
+    ) -> Result<(), NetworkError> {
         let mut digest_bits = [0u8; 32];
         let mut sha2 = Sha512Trunc256::new();
 
@@ -198,12 +143,14 @@ impl Preamble {
 
         let res = pubkey
             .verify(&digest_bits, &self.signature)
-            .map_err(|_ve| net_error::VerifyingError("Failed to verify signature".to_string()))?;
+            .map_err(|_ve| {
+                NetworkError::VerifyingError("Failed to verify signature".to_string())
+            })?;
 
         if res {
             Ok(())
         } else {
-            Err(net_error::VerifyingError(
+            Err(NetworkError::VerifyingError(
                 "Invalid message signature".to_string(),
             ))
         }
@@ -211,7 +158,7 @@ impl Preamble {
 }
 
 impl StacksMessageCodec for Preamble {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.peer_version)?;
         messages::write_next(fd, &self.network_id)?;
         messages::write_next(fd, &self.seq)?;
@@ -225,7 +172,7 @@ impl StacksMessageCodec for Preamble {
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<Preamble, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<Preamble, NetworkError> {
         let peer_version: u32 = messages::read_next(fd)?;
         let network_id: u32 = messages::read_next(fd)?;
         let seq: u32 = messages::read_next(fd)?;
@@ -240,7 +187,7 @@ impl StacksMessageCodec for Preamble {
         // minimum is 5 bytes -- a zero-length vector (4 bytes of 0) plus a type identifier (1 byte)
         if payload_len < 5 {
             test_debug!("Payload len is too small: {}", payload_len);
-            return Err(net_error::DeserializeError(format!(
+            return Err(NetworkError::DeserializeError(format!(
                 "Payload len is too small: {}",
                 payload_len
             )));
@@ -248,7 +195,7 @@ impl StacksMessageCodec for Preamble {
 
         if payload_len >= MAX_MESSAGE_LEN {
             test_debug!("Payload len is too big: {}", payload_len);
-            return Err(net_error::DeserializeError(format!(
+            return Err(NetworkError::DeserializeError(format!(
                 "Payload len is too big: {}",
                 payload_len
             )));
@@ -260,7 +207,7 @@ impl StacksMessageCodec for Preamble {
                 burn_block_height,
                 burn_stable_block_height
             );
-            return Err(net_error::DeserializeError(format!(
+            return Err(NetworkError::DeserializeError(format!(
                 "Burn block height {} <= burn stable block height {}",
                 burn_block_height, burn_stable_block_height
             )));
@@ -282,17 +229,17 @@ impl StacksMessageCodec for Preamble {
 }
 
 impl StacksMessageCodec for GetBlocksInv {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.consensus_hash)?;
         messages::write_next(fd, &self.num_blocks)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<GetBlocksInv, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<GetBlocksInv, NetworkError> {
         let consensus_hash: ConsensusHash = messages::read_next(fd)?;
         let num_blocks: u16 = messages::read_next(fd)?;
         if num_blocks == 0 {
-            return Err(net_error::DeserializeError(
+            return Err(NetworkError::DeserializeError(
                 "GetBlocksInv must request at least one block".to_string(),
             ));
         }
@@ -305,17 +252,17 @@ impl StacksMessageCodec for GetBlocksInv {
 }
 
 impl StacksMessageCodec for BlocksInvData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.bitlen)?;
         messages::write_next(fd, &self.block_bitvec)?;
         messages::write_next(fd, &self.microblocks_bitvec)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<BlocksInvData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<BlocksInvData, NetworkError> {
         let bitlen: u16 = messages::read_next(fd)?;
         if bitlen == 0 {
-            return Err(net_error::DeserializeError(
+            return Err(NetworkError::DeserializeError(
                 "BlocksInv must contain at least one block/microblock bit".to_string(),
             ));
         }
@@ -387,17 +334,17 @@ impl BlocksInvData {
 }
 
 impl StacksMessageCodec for GetPoxInv {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.consensus_hash)?;
         messages::write_next(fd, &self.num_cycles)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<GetPoxInv, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<GetPoxInv, NetworkError> {
         let ch: ConsensusHash = messages::read_next(fd)?;
         let num_rcs: u16 = messages::read_next(fd)?;
         if num_rcs == 0 || num_rcs as u64 > GETPOXINV_MAX_BITLEN {
-            return Err(net_error::DeserializeError(
+            return Err(NetworkError::DeserializeError(
                 "Invalid GetPoxInv bitlen".to_string(),
             ));
         }
@@ -421,16 +368,16 @@ impl PoxInvData {
 }
 
 impl StacksMessageCodec for PoxInvData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.bitlen)?;
         messages::write_next(fd, &self.pox_bitvec)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<PoxInvData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<PoxInvData, NetworkError> {
         let bitlen: u16 = messages::read_next(fd)?;
         if bitlen == 0 || (bitlen as u64) > GETPOXINV_MAX_BITLEN {
-            return Err(net_error::DeserializeError(
+            return Err(NetworkError::DeserializeError(
                 "Invalid PoxInvData bitlen".to_string(),
             ));
         }
@@ -444,7 +391,7 @@ impl StacksMessageCodec for PoxInvData {
 }
 
 impl StacksMessageCodec for (ConsensusHash, BurnchainHeaderHash) {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.0)?;
         messages::write_next(fd, &self.1)?;
         Ok(())
@@ -452,7 +399,7 @@ impl StacksMessageCodec for (ConsensusHash, BurnchainHeaderHash) {
 
     fn consensus_deserialize<R: Read>(
         fd: &mut R,
-    ) -> Result<(ConsensusHash, BurnchainHeaderHash), net_error> {
+    ) -> Result<(ConsensusHash, BurnchainHeaderHash), NetworkError> {
         let consensus_hash: ConsensusHash = messages::read_next(fd)?;
         let burn_header_hash: BurnchainHeaderHash = messages::read_next(fd)?;
         Ok((consensus_hash, burn_header_hash))
@@ -460,12 +407,12 @@ impl StacksMessageCodec for (ConsensusHash, BurnchainHeaderHash) {
 }
 
 impl StacksMessageCodec for BlocksAvailableData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.available)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<BlocksAvailableData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<BlocksAvailableData, NetworkError> {
         let available: Vec<(ConsensusHash, BurnchainHeaderHash)> =
             messages::read_next_at_most::<_, (ConsensusHash, BurnchainHeaderHash)>(
                 fd,
@@ -486,18 +433,18 @@ impl BlocksAvailableData {
         &mut self,
         ch: ConsensusHash,
         bhh: BurnchainHeaderHash,
-    ) -> Result<(), net_error> {
+    ) -> Result<(), NetworkError> {
         if self.available.len() < BLOCKS_AVAILABLE_MAX_LEN as usize {
             self.available.push((ch, bhh));
             return Ok(());
         } else {
-            return Err(net_error::InvalidMessage);
+            return Err(NetworkError::InvalidMessage);
         }
     }
 }
 
 impl StacksMessageCodec for (ConsensusHash, StacksBlock) {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.0)?;
         messages::write_next(fd, &self.1)?;
         Ok(())
@@ -505,7 +452,7 @@ impl StacksMessageCodec for (ConsensusHash, StacksBlock) {
 
     fn consensus_deserialize<R: Read>(
         fd: &mut R,
-    ) -> Result<(ConsensusHash, StacksBlock), net_error> {
+    ) -> Result<(ConsensusHash, StacksBlock), NetworkError> {
         let ch: ConsensusHash = messages::read_next(fd)?;
         let block = {
             let mut bound_read = BoundReader::from_reader(fd, MAX_BLOCK_LEN as u64);
@@ -527,12 +474,12 @@ impl BlocksData {
 }
 
 impl StacksMessageCodec for BlocksData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.blocks)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<BlocksData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<BlocksData, NetworkError> {
         let blocks: Vec<(ConsensusHash, StacksBlock)> = {
             // loose upper-bound
             let mut bound_read = BoundReader::from_reader(fd, MAX_MESSAGE_LEN as u64);
@@ -547,7 +494,7 @@ impl StacksMessageCodec for BlocksData {
         for (consensus_hash, _block) in blocks.iter() {
             if present.contains(consensus_hash) {
                 // no dups allowed
-                return Err(net_error::DeserializeError(
+                return Err(NetworkError::DeserializeError(
                     "Invalid BlocksData: duplicate block".to_string(),
                 ));
             }
@@ -560,13 +507,13 @@ impl StacksMessageCodec for BlocksData {
 }
 
 impl StacksMessageCodec for MicroblocksData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.index_anchor_block)?;
         messages::write_next(fd, &self.microblocks)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<MicroblocksData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<MicroblocksData, NetworkError> {
         let index_anchor_block = messages::read_next(fd)?;
         let microblocks: Vec<StacksMicroblock> = {
             // loose upper-bound
@@ -592,14 +539,14 @@ impl NeighborAddress {
 }
 
 impl StacksMessageCodec for NeighborAddress {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.addrbytes)?;
         messages::write_next(fd, &self.port)?;
         messages::write_next(fd, &self.public_key_hash)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<NeighborAddress, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<NeighborAddress, NetworkError> {
         let addrbytes: PeerAddress = messages::read_next(fd)?;
         let port: u16 = messages::read_next(fd)?;
         let public_key_hash: Hash160 = messages::read_next(fd)?;
@@ -613,12 +560,12 @@ impl StacksMessageCodec for NeighborAddress {
 }
 
 impl StacksMessageCodec for NeighborsData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.neighbors)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<NeighborsData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<NeighborsData, NetworkError> {
         // don't allow list of more than the pre-set number of neighbors
         let neighbors: Vec<NeighborAddress> =
             messages::read_next_at_most::<_, NeighborAddress>(fd, MAX_NEIGHBORS_DATA_LEN)?;
@@ -659,7 +606,7 @@ impl HandshakeData {
 }
 
 impl StacksMessageCodec for HandshakeData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.addrbytes)?;
         messages::write_next(fd, &self.port)?;
         messages::write_next(fd, &self.services)?;
@@ -669,11 +616,11 @@ impl StacksMessageCodec for HandshakeData {
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<HandshakeData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<HandshakeData, NetworkError> {
         let addrbytes: PeerAddress = messages::read_next(fd)?;
         let port: u16 = messages::read_next(fd)?;
         if port == 0 {
-            return Err(net_error::DeserializeError(
+            return Err(NetworkError::DeserializeError(
                 "Invalid handshake data: port is 0".to_string(),
             ));
         }
@@ -703,13 +650,13 @@ impl HandshakeAcceptData {
 }
 
 impl StacksMessageCodec for HandshakeAcceptData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.handshake)?;
         messages::write_next(fd, &self.heartbeat_interval)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<HandshakeAcceptData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<HandshakeAcceptData, NetworkError> {
         let handshake: HandshakeData = messages::read_next(fd)?;
         let heartbeat_interval: u32 = messages::read_next(fd)?;
         Ok(HandshakeAcceptData {
@@ -726,12 +673,12 @@ impl NackData {
 }
 
 impl StacksMessageCodec for NackData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.error_code)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<NackData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<NackData, NetworkError> {
         let error_code: u32 = messages::read_next(fd)?;
         Ok(NackData { error_code })
     }
@@ -746,12 +693,12 @@ impl PingData {
 }
 
 impl StacksMessageCodec for PingData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.nonce)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<PingData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<PingData, NetworkError> {
         let nonce: u32 = messages::read_next(fd)?;
         Ok(PingData { nonce })
     }
@@ -764,26 +711,26 @@ impl PongData {
 }
 
 impl StacksMessageCodec for PongData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.nonce)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<PongData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<PongData, NetworkError> {
         let nonce: u32 = messages::read_next(fd)?;
         Ok(PongData { nonce })
     }
 }
 
 impl StacksMessageCodec for NatPunchData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.addrbytes)?;
         messages::write_next(fd, &self.port)?;
         messages::write_next(fd, &self.nonce)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<NatPunchData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<NatPunchData, NetworkError> {
         let addrbytes: PeerAddress = messages::read_next(fd)?;
         let port: u16 = messages::read_next(fd)?;
         let nonce: u32 = messages::read_next(fd)?;
@@ -796,13 +743,13 @@ impl StacksMessageCodec for NatPunchData {
 }
 
 impl StacksMessageCodec for RelayData {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.peer)?;
         messages::write_next(fd, &self.seq)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<RelayData, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<RelayData, NetworkError> {
         let peer: NeighborAddress = messages::read_next(fd)?;
         let seq: u32 = messages::read_next(fd)?;
         Ok(RelayData { peer, seq })
@@ -920,11 +867,11 @@ impl StacksMessageType {
 }
 
 impl StacksMessageCodec for StacksMessageID {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &(*self as u8))
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<StacksMessageID, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<StacksMessageID, NetworkError> {
         let as_u8: u8 = messages::read_next(fd)?;
         let id = match as_u8 {
             x if x == StacksMessageID::Handshake as u8 => StacksMessageID::Handshake,
@@ -949,7 +896,7 @@ impl StacksMessageCodec for StacksMessageID {
             x if x == StacksMessageID::NatPunchRequest as u8 => StacksMessageID::NatPunchRequest,
             x if x == StacksMessageID::NatPunchReply as u8 => StacksMessageID::NatPunchReply,
             _ => {
-                return Err(net_error::DeserializeError(
+                return Err(NetworkError::DeserializeError(
                     "Unknown message ID".to_string(),
                 ));
             }
@@ -959,7 +906,7 @@ impl StacksMessageCodec for StacksMessageID {
 }
 
 impl StacksMessageCodec for StacksMessageType {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &(self.get_message_id() as u8))?;
         match *self {
             StacksMessageType::Handshake(ref m) => messages::write_next(fd, m)?,
@@ -985,7 +932,7 @@ impl StacksMessageCodec for StacksMessageType {
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<StacksMessageType, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<StacksMessageType, NetworkError> {
         let message_id: StacksMessageID = messages::read_next(fd)?;
         let message = match message_id {
             StacksMessageID::Handshake => {
@@ -1059,7 +1006,7 @@ impl StacksMessageCodec for StacksMessageType {
                 StacksMessageType::NatPunchReply(m)
             }
             StacksMessageID::Reserved => {
-                return Err(net_error::DeserializeError(
+                return Err(NetworkError::DeserializeError(
                     "Unsupported message ID 'reserved'".to_string(),
                 ));
             }
@@ -1069,17 +1016,17 @@ impl StacksMessageCodec for StacksMessageType {
 }
 
 impl StacksMessageCodec for StacksMessage {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), net_error> {
+    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), NetworkError> {
         messages::write_next(fd, &self.preamble)?;
         messages::write_next(fd, &self.relayers)?;
         messages::write_next(fd, &self.payload)?;
         Ok(())
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<StacksMessage, net_error> {
+    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<StacksMessage, NetworkError> {
         let preamble: Preamble = messages::read_next(fd)?;
         if preamble.payload_len > MAX_MESSAGE_LEN - PREAMBLE_ENCODED_SIZE {
-            return Err(net_error::DeserializeError(
+            return Err(NetworkError::DeserializeError(
                 "Message would be too big".to_string(),
             ));
         }
@@ -1153,7 +1100,7 @@ impl StacksMessage {
     }
 
     /// Sign the stacks message
-    fn do_sign(&mut self, private_key: &Secp256k1PrivateKey) -> Result<(), net_error> {
+    fn do_sign(&mut self, private_key: &Secp256k1PrivateKey) -> Result<(), NetworkError> {
         let mut message_bits = vec![];
         self.relayers.consensus_serialize(&mut message_bits)?;
         self.payload.consensus_serialize(&mut message_bits)?;
@@ -1164,9 +1111,13 @@ impl StacksMessage {
 
     /// Sign the StacksMessage.  The StacksMessage must _not_ have any relayers (i.e. we're
     /// originating this messsage).
-    pub fn sign(&mut self, seq: u32, private_key: &Secp256k1PrivateKey) -> Result<(), net_error> {
+    pub fn sign(
+        &mut self,
+        seq: u32,
+        private_key: &Secp256k1PrivateKey,
+    ) -> Result<(), NetworkError> {
         if self.relayers.len() > 0 {
-            return Err(net_error::InvalidMessage);
+            return Err(NetworkError::InvalidMessage);
         }
         self.preamble.seq = seq;
         self.do_sign(private_key)
@@ -1178,13 +1129,13 @@ impl StacksMessage {
         private_key: &Secp256k1PrivateKey,
         our_seq: u32,
         our_addr: &NeighborAddress,
-    ) -> Result<(), net_error> {
+    ) -> Result<(), NetworkError> {
         if self.relayers.len() >= MAX_RELAYERS_LEN as usize {
             warn!(
                 "Message {:?} has too many relayers; will not sign",
                 self.payload.get_message_description()
             );
-            return Err(net_error::InvalidMessage);
+            return Err(NetworkError::InvalidMessage);
         }
 
         // don't sign if signed more than once
@@ -1195,7 +1146,7 @@ impl StacksMessage {
                     self.payload.get_message_description(),
                     &our_addr.public_key_hash
                 );
-                return Err(net_error::InvalidMessage);
+                return Err(NetworkError::InvalidMessage);
             }
         }
 
@@ -1212,7 +1163,7 @@ impl StacksMessage {
 
     pub fn deserialize_body<R: Read>(
         fd: &mut R,
-    ) -> Result<(Vec<RelayData>, StacksMessageType), net_error> {
+    ) -> Result<(Vec<RelayData>, StacksMessageType), NetworkError> {
         let relayers: Vec<RelayData> =
             messages::read_next_at_most::<_, RelayData>(fd, MAX_RELAYERS_LEN)?;
         let payload: StacksMessageType = messages::read_next(fd)?;
@@ -1223,7 +1174,7 @@ impl StacksMessage {
     /// Fails if:
     /// * the signature doesn't match
     /// * the buffer doesn't encode a secp256k1 public key
-    pub fn verify_secp256k1(&self, public_key: &StacksPublicKeyBuffer) -> Result<(), net_error> {
+    pub fn verify_secp256k1(&self, public_key: &StacksPublicKeyBuffer) -> Result<(), NetworkError> {
         let secp256k1_pubkey = public_key.to_public_key()?;
 
         let mut message_bits = vec![];
@@ -1267,9 +1218,9 @@ impl ProtocolFamily for StacksP2P {
     }
 
     /// StacksP2P deals with Preambles
-    fn read_preamble(&mut self, buf: &[u8]) -> Result<(Preamble, usize), net_error> {
+    fn read_preamble(&mut self, buf: &[u8]) -> Result<(Preamble, usize), NetworkError> {
         if buf.len() < PREAMBLE_ENCODED_SIZE as usize {
-            return Err(net_error::UnderflowError(
+            return Err(NetworkError::UnderflowError(
                 "Not enough bytes to form a P2P preamble".to_string(),
             ));
         }
@@ -1285,7 +1236,7 @@ impl ProtocolFamily for StacksP2P {
         &mut self,
         _preamble: &Preamble,
         _fd: &mut R,
-    ) -> Result<(Option<(StacksMessage, usize)>, usize), net_error> {
+    ) -> Result<(Option<(StacksMessage, usize)>, usize), NetworkError> {
         panic!(
             "BUG: tried to stream a StacksP2P message, even though their lengths are always known"
         )
@@ -1296,9 +1247,9 @@ impl ProtocolFamily for StacksP2P {
         &mut self,
         preamble: &Preamble,
         bytes: &[u8],
-    ) -> Result<(StacksMessage, usize), net_error> {
+    ) -> Result<(StacksMessage, usize), NetworkError> {
         if bytes.len() < preamble.payload_len as usize {
-            return Err(net_error::UnderflowError(
+            return Err(NetworkError::UnderflowError(
                 "Not enough bytes to form a StacksMessage".to_string(),
             ));
         }
@@ -1329,7 +1280,7 @@ impl ProtocolFamily for StacksP2P {
         &mut self,
         fd: &mut W,
         message: &StacksMessage,
-    ) -> Result<(), net_error> {
+    ) -> Result<(), NetworkError> {
         message.consensus_serialize(fd)
     }
 }
@@ -1343,14 +1294,14 @@ pub mod test {
 
     use super::*;
 
-    fn check_overflow<T>(r: Result<T, net_error>) -> bool {
+    fn check_overflow<T>(r: Result<T, NetworkError>) -> bool {
         match r {
             Ok(_) => {
                 test_debug!("did not get an overflow error, or any error");
                 false
             }
             Err(e) => match e {
-                net_error::OverflowError(_) => true,
+                NetworkError::OverflowError(_) => true,
                 _ => {
                     test_debug!("did not get an overflow error, but got {:?}", &e);
                     false
@@ -1359,14 +1310,14 @@ pub mod test {
         }
     }
 
-    fn check_underflow<T>(r: Result<T, net_error>) -> bool {
+    fn check_underflow<T>(r: Result<T, NetworkError>) -> bool {
         match r {
             Ok(_) => {
                 test_debug!("did not get an underflow error, or any error");
                 false
             }
             Err(e) => match e {
-                net_error::UnderflowError(_) => true,
+                NetworkError::UnderflowError(_) => true,
                 _ => {
                     test_debug!("did not get an underflow error, but got {:?}", &e);
                     false
@@ -1375,14 +1326,14 @@ pub mod test {
         }
     }
 
-    fn check_deserialize<T: std::fmt::Debug>(r: Result<T, net_error>) -> bool {
+    fn check_deserialize<T: std::fmt::Debug>(r: Result<T, NetworkError>) -> bool {
         match r {
             Ok(m) => {
                 test_debug!("deserialized {:?}", &m);
                 false
             }
             Err(e) => match e {
-                net_error::DeserializeError(_) => true,
+                NetworkError::DeserializeError(_) => true,
                 _ => false,
             },
         }
@@ -1434,7 +1385,7 @@ pub mod test {
                         &write_buf[0..short_len].to_vec()
                     );
                 }
-                Err(net_error::ReadError(io_error)) => match io_error.kind() {
+                Err(NetworkError::ReadError(io_error)) => match io_error.kind() {
                     io::ErrorKind::UnexpectedEof => {}
                     _ => {
                         test_debug!("Got unexpected I/O error: {:?}", &io_error);

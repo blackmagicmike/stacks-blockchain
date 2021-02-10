@@ -28,8 +28,8 @@ use chainstate::burn::BLOCK_HEADER_HASH_ENCODED_SIZE;
 use chainstate::stacks::index::bits::{get_leaf_hash, get_node_hash, get_nodetype_hash_bytes};
 
 use chainstate::stacks::index::node::{
-    clear_backptr, is_backptr, set_backptr, CursorError, TrieCursor, TrieLeaf, TrieNode,
-    TrieNode16, TrieNode256, TrieNode4, TrieNode48, TrieNodeID, TrieNodeType, TriePtr,
+    clear_backptr, is_backptr, set_backptr, TrieCursor, TrieLeaf, TrieNode, TrieNode16,
+    TrieNode256, TrieNode4, TrieNode48, TrieNodeID, TrieNodeType, TriePtr,
 };
 
 use chainstate::stacks::index::storage::{TrieFileStorage, TrieStorageConnection};
@@ -38,7 +38,7 @@ use chainstate::stacks::index::marf::MARF;
 
 use chainstate::stacks::index::{MarfTrieId, TrieHash, TrieHasher, TRIEHASH_ENCODED_SIZE};
 
-use crate::util::errors::MarfError;
+use crate::util::errors::{CursorError, MarfError};
 
 use sha2::Digest;
 use util::hash::to_hex;

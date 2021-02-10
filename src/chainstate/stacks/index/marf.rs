@@ -30,9 +30,8 @@ use chainstate::burn::BlockHeaderHash;
 use chainstate::stacks::index::bits::{get_leaf_hash, get_node_hash, read_root_hash};
 
 use chainstate::stacks::index::node::{
-    clear_backptr, is_backptr, set_backptr, CursorError, TrieCursor, TrieLeaf, TrieNode,
-    TrieNode16, TrieNode256, TrieNode4, TrieNode48, TrieNodeID, TrieNodeType, TriePath, TriePtr,
-    TRIEPTR_SIZE,
+    clear_backptr, is_backptr, set_backptr, TrieCursor, TrieLeaf, TrieNode, TrieNode16,
+    TrieNode256, TrieNode4, TrieNode48, TrieNodeID, TrieNodeType, TriePath, TriePtr, TRIEPTR_SIZE,
 };
 
 use chainstate::stacks::index::storage::{
@@ -45,8 +44,8 @@ use chainstate::stacks::index::{
 
 use chainstate::stacks::index::trie::Trie;
 
-use crate::util::errors::DBError as db_error;
 use crate::util::errors::MarfError;
+use crate::util::errors::{CursorError, DBError as db_error};
 use std::ops::DerefMut;
 use util::hash::Sha512Trunc256Sum;
 use util::log;

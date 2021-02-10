@@ -1749,8 +1749,7 @@ mod test {
         database::{BurnStateDB, HeadersDB, MarfedKV, STXBalance},
         eval_all, execute,
         types::PrincipalData,
-        ContractContext, Error, GlobalContext, LimitedCostTracker, QualifiedContractIdentifier,
-        Value,
+        ContractContext, GlobalContext, LimitedCostTracker, QualifiedContractIdentifier, Value,
     };
 
     struct DocHeadersDB {}

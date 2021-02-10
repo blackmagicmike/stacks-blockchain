@@ -1001,7 +1001,7 @@ pub mod test {
         burnchain: &Burnchain,
         sortdb: &SortitionDB,
         block_id: &StacksBlockId,
-    ) -> Result<Vec<(StacksAddress, u128)>, Error> {
+    ) -> Result<Vec<(StacksAddress, u128)>, ChainstateError> {
         let burn_block_height = get_par_burn_block_height(state, block_id);
         state
             .get_reward_addresses(burnchain, sortdb, burn_block_height, block_id)

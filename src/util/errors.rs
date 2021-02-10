@@ -5,7 +5,7 @@ use serde::export::fmt;
 
 use chainstate::burn::BlockHeaderHash;
 use chainstate::stacks::events::StacksTransactionEvent;
-use chainstate::stacks::index::node;
+use chainstate::stacks::index::node::TriePtr;
 use net::NeighborKey;
 use vm::contexts::{AssetMap, GlobalContext, StackTrace};
 use vm::costs::ExecutionCost;
@@ -1164,7 +1164,7 @@ pub enum MarfError {
     PartialWriteError,
     InProgressError,
     WriteNotBegunError,
-    CursorError(node::CursorError),
+    CursorError(CursorError),
     RestoreMarfBlockError(Box<MarfError>),
     NonMatchingForks([u8; 32], [u8; 32]),
 }
@@ -1615,4 +1615,27 @@ pub enum CostErrors {
     CostBalanceExceeded(ExecutionCost, ExecutionCost),
     MemoryBalanceExceeded(u64, u64),
     CostContractLoadFailure,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CursorError {
+    PathDiverged,
+    BackptrEncountered(TriePtr),
+    ChrNotFound,
+}
+
+impl fmt::Display for CursorError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            CursorError::PathDiverged => write!(f, "Path diverged"),
+            CursorError::BackptrEncountered(_) => write!(f, "Back-pointer encountered"),
+            CursorError::ChrNotFound => write!(f, "Node child not found"),
+        }
+    }
+}
+
+impl error::Error for CursorError {
+    fn cause(&self) -> Option<&dyn error::Error> {
+        None
+    }
 }
