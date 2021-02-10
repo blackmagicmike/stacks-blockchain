@@ -24,6 +24,7 @@ use std::marker::PhantomData;
 
 use rusqlite::Error as sqlite_error;
 
+use crate::util::errors::DBError as db_error;
 use address::AddressHashMode;
 use chainstate::burn::db::sortdb::PoxId;
 use chainstate::burn::distribution::BurnSamplePoint;
@@ -37,7 +38,6 @@ use chainstate::stacks::StacksAddress;
 use chainstate::stacks::StacksPublicKey;
 use core::*;
 use net::neighbors::MAX_NEIGHBOR_BLOCK_DELAY;
-use util::db::Error as db_error;
 use util::hash::Hash160;
 use util::secp256k1::MessageSignature;
 

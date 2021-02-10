@@ -22,16 +22,16 @@ use std::io::{Read, Write};
 use sha2::Digest;
 use sha2::Sha512Trunc256;
 
+use crate::util::errors::ChainstateError;
+use crate::util::errors::NetworkError as net_error;
 use burnchains::BurnchainHeaderHash;
 use chainstate::burn::operations::*;
 use chainstate::burn::BlockHeaderHash;
 use chainstate::burn::ConsensusHash;
 use chainstate::burn::*;
 use chainstate::stacks::index::TrieHash;
-use chainstate::stacks::Error;
 use chainstate::stacks::*;
 use core::*;
-use net::Error as net_error;
 use net::MAX_MESSAGE_LEN;
 use util::hash::MerkleTree;
 use util::hash::Sha512Trunc256Sum;
@@ -245,7 +245,7 @@ impl StacksBlockHeader {
         leader_key: &LeaderKeyRegisterOp,
         block_commit: &LeaderBlockCommitOp,
         stacks_chain_tip: &BlockSnapshot,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         // the burn chain tip's sortition must have chosen given block commit
         assert_eq!(
             burn_chain_tip.winning_stacks_block_hash,
@@ -262,7 +262,7 @@ impl StacksBlockHeader {
                 burn_chain_tip.winning_stacks_block_hash
             );
             debug!("{}", msg);
-            return Err(Error::InvalidStacksBlock(msg));
+            return Err(ChainstateError::InvalidStacksBlock(msg));
         }
 
         // this header must match the parent header as recorded on the burn chain
@@ -274,7 +274,7 @@ impl StacksBlockHeader {
                 stacks_chain_tip.winning_stacks_block_hash
             );
             debug!("{}", msg);
-            return Err(Error::InvalidStacksBlock(msg));
+            return Err(ChainstateError::InvalidStacksBlock(msg));
         }
 
         // this header's proof must hash to the burn chain tip's VRF seed
@@ -287,7 +287,7 @@ impl StacksBlockHeader {
                 VRFSeed::from_proof(&self.proof)
             );
             debug!("{}", msg);
-            return Err(Error::InvalidStacksBlock(msg));
+            return Err(ChainstateError::InvalidStacksBlock(msg));
         }
 
         // this header must commit to all of the work seen so far in this stacks blockchain fork.
@@ -299,7 +299,7 @@ impl StacksBlockHeader {
                 stacks_chain_tip.total_burn
             );
             debug!("{}", msg);
-            return Err(Error::InvalidStacksBlock(msg));
+            return Err(ChainstateError::InvalidStacksBlock(msg));
         }
 
         // this header's VRF proof must have been generated from the last sortition's sortition
@@ -328,7 +328,7 @@ impl StacksBlockHeader {
         if !valid {
             let msg = format!("Invalid Stacks block header {}: leader VRF key {} did not produce a valid proof over {}", self.block_hash(), leader_key.public_key.to_hex(), burn_chain_tip.sortition_hash);
             warn!("{}", msg);
-            return Err(Error::InvalidStacksBlock(msg));
+            return Err(ChainstateError::InvalidStacksBlock(msg));
         }
 
         // not verified by this method:

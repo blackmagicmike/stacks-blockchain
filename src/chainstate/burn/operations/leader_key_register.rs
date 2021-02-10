@@ -45,9 +45,9 @@ use chainstate::stacks::StacksAddress;
 use chainstate::stacks::StacksPrivateKey;
 use chainstate::stacks::StacksPublicKey;
 
+use crate::util::errors::NetworkError as net_error;
 use crate::util::messages::write_next;
 use crate::util::messages::StacksMessageCodec;
-use net::Error as net_error;
 
 use util::hash::DoubleSha256;
 use util::log;

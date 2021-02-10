@@ -25,12 +25,12 @@ use std::ops::{Deref, DerefMut};
 
 use sha2::Digest;
 
+use crate::util::errors::MarfError;
 use crate::util::messages::read_next;
 use chainstate::burn::{BlockHeaderHash, BLOCK_HEADER_HASH_ENCODED_SIZE};
 use chainstate::stacks::index::bits::{
     get_path_byte_len, get_ptrs_byte_len, path_from_bytes, ptrs_from_bytes, write_path_to_bytes,
 };
-use chainstate::stacks::index::Error;
 use chainstate::stacks::index::{
     slice_partialeq, BlockMap, MARFValue, MarfTrieId, TrieHash, TrieHasher,
     MARF_VALUE_ENCODED_SIZE, TRIEHASH_ENCODED_SIZE,
@@ -92,7 +92,7 @@ pub fn clear_backptr(id: u8) -> u8 {
 
 // Byte writing operations for pointer lists, paths.
 
-fn write_ptrs_to_bytes<W: Write>(ptrs: &[TriePtr], w: &mut W) -> Result<(), Error> {
+fn write_ptrs_to_bytes<W: Write>(ptrs: &[TriePtr], w: &mut W) -> Result<(), MarfError> {
     for ptr in ptrs.iter() {
         ptr.write_bytes(w)?;
     }
@@ -103,7 +103,7 @@ fn ptrs_consensus_hash<W: Write, M: BlockMap>(
     ptrs: &[TriePtr],
     map: &mut M,
     w: &mut W,
-) -> Result<(), Error> {
+) -> Result<(), MarfError> {
     for ptr in ptrs.iter() {
         ptr.write_consensus_bytes(map, w)?;
     }
@@ -147,7 +147,7 @@ pub trait TrieNode {
     fn replace(&mut self, ptr: &TriePtr) -> bool;
 
     /// Read an encoded instance of this node from a byte stream and instantiate it.
-    fn from_bytes<R: Read>(r: &mut R) -> Result<Self, Error>
+    fn from_bytes<R: Read>(r: &mut R) -> Result<Self, MarfError>
     where
         Self: std::marker::Sized;
 
@@ -161,7 +161,7 @@ pub trait TrieNode {
     fn as_trie_node_type(&self) -> TrieNodeType;
 
     /// Encode this node instance into a byte stream and write it to w.
-    fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+    fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), MarfError> {
         w.write_all(&[self.id()])?;
         write_ptrs_to_bytes(self.ptrs(), w)?;
         write_path_to_bytes(self.path().as_slice(), w)
@@ -193,7 +193,7 @@ pub trait ConsensusSerializable<M> {
         &self,
         additional_data: &mut M,
         w: &mut W,
-    ) -> Result<(), Error>;
+    ) -> Result<(), MarfError>;
 
     #[cfg(test)]
     fn to_consensus_bytes(&self, additional_data: &mut M) -> Vec<u8> {
@@ -205,7 +205,7 @@ pub trait ConsensusSerializable<M> {
 }
 
 impl<T: TrieNode, M: BlockMap> ConsensusSerializable<M> for T {
-    fn write_consensus_bytes<W: Write>(&self, map: &mut M, w: &mut W) -> Result<(), Error> {
+    fn write_consensus_bytes<W: Write>(&self, map: &mut M, w: &mut W) -> Result<(), MarfError> {
         w.write_all(&[self.id()])?;
         ptrs_consensus_hash(self.ptrs(), map, w)?;
         write_path_to_bytes(self.path().as_slice(), w)
@@ -290,7 +290,7 @@ impl TriePtr {
     }
 
     #[inline]
-    pub fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+    pub fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), MarfError> {
         w.write_all(&[self.id(), self.chr()])?;
         w.write_all(&self.ptr().to_be_bytes())?;
         w.write_all(&self.back_block().to_be_bytes())?;
@@ -304,7 +304,7 @@ impl TriePtr {
         &self,
         block_map: &mut M,
         w: &mut W,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         w.write_all(&[self.id(), self.chr()])?;
 
         if is_backptr(self.id()) {
@@ -639,12 +639,17 @@ impl TrieLeaf {
 }
 
 impl StacksMessageCodec for TrieLeaf {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), ::net::Error> {
+    fn consensus_serialize<W: Write>(
+        &self,
+        fd: &mut W,
+    ) -> Result<(), crate::util::errors::NetworkError> {
         self.path.consensus_serialize(fd)?;
         self.data.consensus_serialize(fd)
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<TrieLeaf, ::net::Error> {
+    fn consensus_deserialize<R: Read>(
+        fd: &mut R,
+    ) -> Result<TrieLeaf, crate::util::errors::NetworkError> {
         let path = read_next(fd)?;
         let data = read_next(fd)?;
 
@@ -849,7 +854,7 @@ impl TrieNode for TrieNode4 {
         return None;
     }
 
-    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieNode4, Error> {
+    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieNode4, MarfError> {
         let mut ptrs_slice = [TriePtr::default(); 4];
         ptrs_from_bytes(TrieNodeID::Node4 as u8, r, &mut ptrs_slice)?;
         let path = path_from_bytes(r)?;
@@ -918,7 +923,7 @@ impl TrieNode for TrieNode16 {
         return None;
     }
 
-    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieNode16, Error> {
+    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieNode16, MarfError> {
         let mut ptrs_slice = [TriePtr::default(); 16];
         ptrs_from_bytes(TrieNodeID::Node16 as u8, r, &mut ptrs_slice)?;
 
@@ -988,7 +993,7 @@ impl TrieNode for TrieNode48 {
         return None;
     }
 
-    fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+    fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), MarfError> {
         w.write_all(&[self.id()])?;
         write_ptrs_to_bytes(self.ptrs(), w)?;
 
@@ -1003,15 +1008,15 @@ impl TrieNode for TrieNode48 {
         get_ptrs_byte_len(&self.ptrs) + 256 + get_path_byte_len(&self.path)
     }
 
-    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieNode48, Error> {
+    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieNode48, MarfError> {
         let mut ptrs_slice = [TriePtr::default(); 48];
         ptrs_from_bytes(TrieNodeID::Node48 as u8, r, &mut ptrs_slice)?;
 
         let mut indexes = [0u8; 256];
-        let l_indexes = r.read(&mut indexes).map_err(Error::IOError)?;
+        let l_indexes = r.read(&mut indexes).map_err(MarfError::IOError)?;
 
         if l_indexes != 256 {
-            return Err(Error::CorruptionError(
+            return Err(MarfError::CorruptionError(
                 "Node48: Failed to read 256 indexes".to_string(),
             ));
         }
@@ -1036,7 +1041,7 @@ impl TrieNode for TrieNode48 {
                 || (indexes_slice[ptr.chr() as usize] >= 0
                     && indexes_slice[ptr.chr() as usize] < 48))
             {
-                return Err(Error::CorruptionError(
+                return Err(MarfError::CorruptionError(
                     "Node48: corrupt index array: invalid index value".to_string(),
                 ));
             }
@@ -1051,7 +1056,7 @@ impl TrieNode for TrieNode48 {
                     && (indexes_slice[i] as usize) < ptrs_slice.len()
                     && ptrs_slice[indexes_slice[i] as usize].id() != TrieNodeID::Empty as u8))
             {
-                return Err(Error::CorruptionError(
+                return Err(MarfError::CorruptionError(
                     "Node48: corrupt index array: index points to empty node".to_string(),
                 ));
             }
@@ -1123,7 +1128,7 @@ impl TrieNode for TrieNode256 {
         return None;
     }
 
-    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieNode256, Error> {
+    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieNode256, MarfError> {
         let mut ptrs_slice = [TriePtr::default(); 256];
         ptrs_from_bytes(TrieNodeID::Node256 as u8, r, &mut ptrs_slice)?;
 
@@ -1168,7 +1173,7 @@ impl TrieNode for TrieNode256 {
 }
 
 impl TrieLeaf {
-    pub fn write_consensus_bytes_leaf<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+    pub fn write_consensus_bytes_leaf<W: Write>(&self, w: &mut W) -> Result<(), MarfError> {
         self.write_bytes(w)
     }
 }
@@ -1186,7 +1191,7 @@ impl TrieNode for TrieLeaf {
         None
     }
 
-    fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+    fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), MarfError> {
         w.write_all(&[self.id()])?;
         write_path_to_bytes(&self.path, w)?;
         w.write_all(&self.data.0[..])?;
@@ -1197,18 +1202,18 @@ impl TrieNode for TrieLeaf {
         1 + get_path_byte_len(&self.path) + self.data.len()
     }
 
-    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieLeaf, Error> {
+    fn from_bytes<R: Read>(r: &mut R) -> Result<TrieLeaf, MarfError> {
         let mut idbuf = [0u8; 1];
-        let l_idbuf = r.read(&mut idbuf).map_err(Error::IOError)?;
+        let l_idbuf = r.read(&mut idbuf).map_err(MarfError::IOError)?;
 
         if l_idbuf != 1 {
-            return Err(Error::CorruptionError(
+            return Err(MarfError::CorruptionError(
                 "Leaf: failed to read ID".to_string(),
             ));
         }
 
         if clear_backptr(idbuf[0]) != TrieNodeID::Leaf as u8 {
-            return Err(Error::CorruptionError(format!(
+            return Err(MarfError::CorruptionError(format!(
                 "Leaf: bad ID {:x}",
                 idbuf[0]
             )));
@@ -1216,10 +1221,10 @@ impl TrieNode for TrieLeaf {
 
         let path = path_from_bytes(r)?;
         let mut leaf_data = [0u8; MARF_VALUE_ENCODED_SIZE as usize];
-        let l_leaf_data = r.read(&mut leaf_data).map_err(Error::IOError)?;
+        let l_leaf_data = r.read(&mut leaf_data).map_err(MarfError::IOError)?;
 
         if l_leaf_data != (MARF_VALUE_ENCODED_SIZE as usize) {
-            return Err(Error::CorruptionError(format!(
+            return Err(MarfError::CorruptionError(format!(
                 "Leaf: read only {} out of {} bytes",
                 l_leaf_data, MARF_VALUE_ENCODED_SIZE
             )));
@@ -1317,7 +1322,7 @@ impl TrieNodeType {
         with_node!(self, ref data, data.walk(chr))
     }
 
-    pub fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+    pub fn write_bytes<W: Write>(&self, w: &mut W) -> Result<(), MarfError> {
         with_node!(self, ref data, data.write_bytes(w))
     }
 
@@ -1325,7 +1330,7 @@ impl TrieNodeType {
         &self,
         map: &mut M,
         w: &mut W,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         with_node!(self, ref data, data.write_consensus_bytes(map, w))
     }
 

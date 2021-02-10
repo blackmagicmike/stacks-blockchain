@@ -23,6 +23,10 @@ use std::io::prelude::*;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
 
+use crate::util::errors::ClientError;
+use crate::util::errors::{
+    InterpreterError as ClarityRuntimeError, InterpreterFailureError, NetworkError as net_error,
+};
 use crate::util::messages::StacksMessageCodec;
 use core::mempool::*;
 use net::atlas::{AtlasDB, Attachment, MAX_ATTACHMENT_INV_PAGES_PER_REQUEST};
@@ -35,8 +39,6 @@ use net::p2p::PeerMap;
 use net::p2p::PeerNetwork;
 use net::relay::Relayer;
 use net::BlocksData;
-use net::ClientError;
-use net::Error as net_error;
 use net::HttpRequestMetadata;
 use net::HttpRequestType;
 use net::HttpResponseMetadata;
@@ -69,6 +71,7 @@ use burnchains::Burnchain;
 use burnchains::BurnchainHeaderHash;
 use burnchains::BurnchainView;
 
+use crate::util::errors::ChainstateError as chain_error;
 use burnchains::*;
 use chainstate::burn::db::sortdb::SortitionDB;
 use chainstate::burn::BlockHeaderHash;
@@ -76,14 +79,13 @@ use chainstate::burn::ConsensusHash;
 use chainstate::stacks::db::{
     blocks::MINIMUM_TX_FEE_RATE_PER_BYTE, BlockStreamData, StacksChainState,
 };
-use chainstate::stacks::Error as chain_error;
 use chainstate::stacks::*;
 use monitoring;
 
 use rusqlite::{DatabaseName, NO_PARAMS};
 
+use crate::util::errors::DBError as db_error;
 use util::db::DBConn;
-use util::db::Error as db_error;
 use util::get_epoch_time_secs;
 use util::hash::Hash160;
 use util::hash::{hex_bytes, to_hex};
@@ -96,8 +98,6 @@ use vm::{
     database::{
         marf::ContractCommitment, ClarityDatabase, ClaritySerializable, MarfedKV, STXBalance,
     },
-    errors::Error as ClarityRuntimeError,
-    errors::InterpreterError,
     types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData},
     ClarityName, ContractName, SymbolicExpression, Value,
 };
@@ -1148,7 +1148,7 @@ impl ConversationHttp {
                         )
                     })
                     .map_err(|_| {
-                        ClarityRuntimeError::from(InterpreterError::CostContractLoadFailure)
+                        ClarityRuntimeError::from(InterpreterFailureError::CostContractLoadFailure)
                     })?;
 
                 clarity_tx.with_readonly_clarity_env(mainnet, sender.clone(), cost_track, |env| {
@@ -2700,6 +2700,7 @@ mod test {
     use burnchains::BurnchainHeaderHash;
     use burnchains::BurnchainView;
 
+    use crate::util::errors::ChainstateError as chain_error;
     use burnchains::*;
     use chainstate::burn::BlockHeaderHash;
     use chainstate::burn::ConsensusHash;
@@ -2708,7 +2709,6 @@ mod test {
     use chainstate::stacks::db::StacksChainState;
     use chainstate::stacks::miner::*;
     use chainstate::stacks::test::*;
-    use chainstate::stacks::Error as chain_error;
     use chainstate::stacks::*;
 
     use address::*;

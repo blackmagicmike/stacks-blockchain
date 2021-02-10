@@ -16,18 +16,19 @@
 
 use std::cmp;
 use std::convert::{TryFrom, TryInto};
+
 use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{cost_functions, runtime_cost, CostOverflowingMath};
-use vm::errors::{
-    check_argument_count, check_arguments_at_least, CheckErrors, InterpreterResult as Result,
-    RuntimeErrorType,
-};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
 use vm::representations::{SymbolicExpression, SymbolicExpressionType};
 use vm::types::{
     signatures::ListTypeData, CharType, ListData, SequenceData, TypeSignature,
     TypeSignature::BoolType, Value,
 };
 use vm::{apply, eval, lookup_function, CallableType, Environment, LocalContext};
+
+use crate::util::errors::RuntimeErrorType;
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least};
 
 pub fn list_cons(
     args: &[SymbolicExpression],

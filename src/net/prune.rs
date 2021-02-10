@@ -18,7 +18,7 @@ use net::p2p::*;
 /// This module contains the logic for pruning client and neighbor connections
 use net::*;
 
-use net::Error as net_error;
+use crate::util::errors::NetworkError as net_error;
 
 use net::connection::ConnectionOptions;
 
@@ -32,8 +32,8 @@ use net::db::PeerDB;
 
 use net::neighbors::*;
 
+use crate::util::errors::DBError as db_error;
 use util::db::DBConn;
-use util::db::Error as db_error;
 
 use std::net::Shutdown;
 use std::net::SocketAddr;

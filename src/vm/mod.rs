@@ -16,6 +16,29 @@
 
 extern crate regex;
 
+use std::convert::{TryFrom, TryInto};
+
+use vm::callables::CallableType;
+use vm::contexts::GlobalContext;
+pub use vm::contexts::MAX_CONTEXT_DEPTH;
+use vm::contexts::{CallStack, ContractContext, Environment, LocalContext};
+use vm::costs::cost_functions::ClarityCostFunction;
+use vm::costs::{
+    cost_functions, runtime_cost, CostOverflowingMath, CostTracker, LimitedCostTracker,
+    MemoryConsumer,
+};
+use vm::database::MemoryBackingStore;
+use vm::errors::{CheckErrors, InterpreterResult as Result};
+use vm::functions::define::DefineResult;
+pub use vm::functions::stx_transfer_consolidated;
+pub use vm::representations::{
+    ClarityName, ContractName, SymbolicExpression, SymbolicExpressionType,
+};
+pub use vm::types::Value;
+use vm::types::{PrincipalData, QualifiedContractIdentifier, TraitIdentifier, TypeSignature};
+
+use crate::util::errors::{InterpreterError, InterpreterFailureError, RuntimeErrorType};
+
 pub mod diagnostic;
 pub mod errors;
 
@@ -42,35 +65,11 @@ pub mod docs;
 #[cfg(test)]
 pub mod tests;
 
-use vm::callables::CallableType;
-use vm::contexts::GlobalContext;
-use vm::contexts::{CallStack, ContractContext, Environment, LocalContext};
-use vm::costs::{
-    cost_functions, runtime_cost, CostOverflowingMath, CostTracker, LimitedCostTracker,
-    MemoryConsumer,
-};
-use vm::database::MemoryBackingStore;
-use vm::errors::{
-    CheckErrors, Error, InterpreterError, InterpreterResult as Result, RuntimeErrorType,
-};
-use vm::functions::define::DefineResult;
-pub use vm::types::Value;
-use vm::types::{PrincipalData, QualifiedContractIdentifier, TraitIdentifier, TypeSignature};
-
-pub use vm::representations::{
-    ClarityName, ContractName, SymbolicExpression, SymbolicExpressionType,
-};
-
-use std::convert::{TryFrom, TryInto};
-pub use vm::contexts::MAX_CONTEXT_DEPTH;
-use vm::costs::cost_functions::ClarityCostFunction;
-pub use vm::functions::stx_transfer_consolidated;
-
-const MAX_CALL_STACK_DEPTH: usize = 64;
+pub const MAX_CALL_STACK_DEPTH: usize = 64;
 
 fn lookup_variable(name: &str, context: &LocalContext, env: &mut Environment) -> Result<Value> {
     if name.starts_with(char::is_numeric) || name.starts_with('\'') {
-        Err(InterpreterError::BadSymbolicRepresentation(format!(
+        Err(InterpreterFailureError::BadSymbolicRepresentation(format!(
             "Unexpected variable name: {}",
             name
         ))
@@ -117,7 +116,7 @@ pub fn lookup_function(name: &str, env: &mut Environment) -> Result<CallableType
 }
 
 fn add_stack_trace(result: &mut Result<Value>, env: &Environment) {
-    if let Err(Error::Runtime(_, ref mut stack_trace)) = result {
+    if let Err(InterpreterError::Runtime(_, ref mut stack_trace)) = result {
         if stack_trace.is_none() {
             stack_trace.replace(env.call_stack.make_stack_trace());
         }
@@ -173,7 +172,7 @@ pub fn apply(
                 Err(e) => {
                     env.drop_memory(used_memory);
                     env.call_stack.decr_apply_depth();
-                    return Err(Error::from(e));
+                    return Err(InterpreterError::from(e));
                 }
             };
             used_memory += arg_value.get_memory_use();
@@ -185,7 +184,7 @@ pub fn apply(
         let mut resp = match function {
             CallableType::NativeFunction(_, function, cost_function) => {
                 runtime_cost(*cost_function, env, evaluated_args.len())
-                    .map_err(Error::from)
+                    .map_err(InterpreterError::from)
                     .and_then(|_| function.apply(evaluated_args))
             }
             CallableType::UserFunction(function) => function.apply(&evaluated_args, env),
@@ -370,10 +369,10 @@ pub fn execute(program: &str) -> Result<Option<Value>> {
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
+
     use vm::callables::{DefineType, DefinedFunction};
     use vm::costs::LimitedCostTracker;
     use vm::database::MemoryBackingStore;
-    use vm::errors::RuntimeErrorType;
     use vm::eval;
     use vm::execute;
     use vm::types::{QualifiedContractIdentifier, TypeSignature};
@@ -381,6 +380,8 @@ mod test {
         CallStack, ContractContext, Environment, GlobalContext, LocalContext, SymbolicExpression,
         Value,
     };
+
+    use crate::util::errors::RuntimeErrorType;
 
     #[test]
     fn test_simple_user_function() {

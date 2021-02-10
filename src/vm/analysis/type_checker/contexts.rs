@@ -15,14 +15,16 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+
+use util::errors::CheckErrors;
+use vm::analysis::types::ContractAnalysis;
+use vm::contexts::MAX_CONTEXT_DEPTH;
 use vm::representations::{ClarityName, SymbolicExpression};
 use vm::types::signatures::FunctionSignature;
 use vm::types::{FunctionType, TraitIdentifier, TypeSignature};
 
-use vm::contexts::MAX_CONTEXT_DEPTH;
-
-use vm::analysis::errors::{CheckError, CheckErrors, CheckResult};
-use vm::analysis::types::ContractAnalysis;
+use crate::util::errors::CheckError;
+use crate::vm::analysis::CheckResult;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TypeMap {

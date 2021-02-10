@@ -25,9 +25,9 @@ use std::convert::From;
 use std::convert::TryFrom;
 use std::fs;
 
+use crate::util::errors::DBError as db_error;
 use util::db::tx_begin_immediate;
 use util::db::DBConn;
-use util::db::Error as db_error;
 use util::db::{query_count, query_row, query_rows, u64_to_sql, FromColumn, FromRow};
 
 use util;

@@ -14,15 +14,14 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod contexts;
-//mod maps;
-pub mod natives;
-
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
+
+use vm::contexts::Environment;
+use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{
     analysis_typecheck_cost, cost_functions, runtime_cost, ClarityCostFunctionReference,
-    CostErrors, CostOverflowingMath, CostTracker, ExecutionCost, LimitedCostTracker,
+    CostOverflowingMath, CostTracker, ExecutionCost, LimitedCostTracker,
 };
 use vm::functions::define::DefineFunctionsParsed;
 use vm::functions::NativeFunctions;
@@ -37,18 +36,22 @@ use vm::types::{
 };
 use vm::variables::NativeVariables;
 
+pub use crate::util::errors::CheckError;
+use crate::util::errors::CostErrors;
+pub use crate::vm::analysis::check_argument_count;
+pub use crate::vm::analysis::check_arguments_at_least;
+pub use crate::vm::analysis::CheckResult;
+
 pub use super::types::{AnalysisPass, ContractAnalysis};
 use super::AnalysisDatabase;
 
 use self::contexts::{ContractContext, TypeMap, TypingContext};
-
 pub use self::natives::{SimpleNativeFunction, TypedNativeFunction};
+use util::errors::CheckErrors;
 
-pub use super::errors::{
-    check_argument_count, check_arguments_at_least, CheckError, CheckErrors, CheckResult,
-};
-use vm::contexts::Environment;
-use vm::costs::cost_functions::ClarityCostFunction;
+pub mod contexts;
+//mod maps;
+pub mod natives;
 
 #[cfg(test)]
 mod tests;

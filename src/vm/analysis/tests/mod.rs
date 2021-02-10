@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use vm::analysis::errors::CheckErrors;
+use util::errors::CheckErrors;
 use vm::analysis::{mem_type_check, AnalysisDatabase};
 use vm::analysis::{type_check, ContractAnalysis};
 use vm::ast::parse;

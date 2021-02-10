@@ -20,7 +20,6 @@ use chainstate::stacks::index::MarfTrieId;
 use chainstate::stacks::StacksBlockId;
 use util::hash::hex_bytes;
 use vm::ast;
-use vm::ast::errors::ParseErrors;
 use vm::clarity::ClarityInstance;
 use vm::contexts::{Environment, GlobalContext, OwnedEnvironment};
 use vm::contracts::Contract;
@@ -28,15 +27,17 @@ use vm::costs::ExecutionCost;
 use vm::database::{
     ClarityDatabase, MarfedKV, MemoryBackingStore, NULL_BURN_STATE_DB, NULL_HEADER_DB,
 };
-use vm::errors::{CheckErrors, Error, RuntimeErrorType};
+use vm::errors::CheckErrors;
 use vm::execute as vm_execute;
 use vm::representations::SymbolicExpression;
+use vm::tests::{execute, symbols_from_values, with_marfed_environment, with_memory_environment};
 use vm::types::{
     OptionalData, PrincipalData, QualifiedContractIdentifier, ResponseData, StandardPrincipalData,
     TypeSignature, Value,
 };
 
-use vm::tests::{execute, symbols_from_values, with_marfed_environment, with_memory_environment};
+use crate::util::errors::InterpreterError;
+use crate::util::errors::{ParseErrors, RuntimeErrorType};
 
 const FACTORIAL_CONTRACT: &str = "(define-map factorials { id: int } { current: int, index: int })
          (define-private (init-factorial (id int) (factorial int))
@@ -1016,7 +1017,7 @@ fn test_factorial_contract(owned_env: &mut OwnedEnvironment) {
         )
         .unwrap_err();
     match err_result {
-        Error::Unchecked(CheckErrors::NoSuchPublicFunction(_, _)) => {}
+        InterpreterError::Unchecked(CheckErrors::NoSuchPublicFunction(_, _)) => {}
         _ => {
             println!("{:?}", err_result);
             panic!("Attempt to call init-factorial should fail!")
@@ -1032,7 +1033,7 @@ fn test_factorial_contract(owned_env: &mut OwnedEnvironment) {
         )
         .unwrap_err();
     match err_result {
-        Error::Unchecked(CheckErrors::TypeValueError(_, _)) => {}
+        InterpreterError::Unchecked(CheckErrors::TypeValueError(_, _)) => {}
         _ => {
             println!("{:?}", err_result);
             assert!(false, "Attempt to call compute with void type should fail!")
@@ -1054,7 +1055,7 @@ fn test_at_unknown_block() {
             .unwrap_err();
         eprintln!("{}", err);
         match err {
-            Error::Runtime(x, _) => assert_eq!(
+            InterpreterError::Runtime(x, _) => assert_eq!(
                 x,
                 RuntimeErrorType::UnknownBlockHeaderHash(BlockHeaderHash::from(
                     vec![2 as u8; 32].as_slice()

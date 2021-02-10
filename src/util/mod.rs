@@ -20,6 +20,7 @@ pub mod log;
 pub mod macros;
 #[macro_use]
 pub mod db;
+pub mod errors;
 pub mod hash;
 pub mod messages;
 pub mod pair;

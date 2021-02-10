@@ -34,9 +34,9 @@ use std::sync::mpsc::TrySendError;
 use mio;
 use mio::net as mio_net;
 
+use crate::util::errors::NetworkError as net_error;
 use crate::util::messages::StacksMessageCodec;
 use net::codec::*;
-use net::Error as net_error;
 use net::HttpRequestPreamble;
 use net::HttpResponsePreamble;
 use net::MessageSequence;

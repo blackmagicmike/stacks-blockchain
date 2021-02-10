@@ -28,8 +28,8 @@ use std::sync::mpsc::TrySendError;
 use std::hash::{Hash, Hasher};
 use std::net::ToSocketAddrs;
 
+use crate::util::errors::NetworkError as net_error;
 use net::asn::ASEntry4;
-use net::Error as net_error;
 use net::Neighbor;
 use net::NeighborKey;
 use net::PeerAddress;
@@ -37,7 +37,7 @@ use net::PeerAddress;
 use net::codec::*;
 use net::*;
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 use util::sleep_ms;
 
 use std::net::SocketAddr;

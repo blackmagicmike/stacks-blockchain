@@ -14,23 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use vm::functions::tuples;
-
 use std::convert::TryFrom;
+
 use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{cost_functions, runtime_cost, CostTracker};
-use vm::errors::{
-    check_argument_count, CheckErrors, Error, InterpreterError, InterpreterResult as Result,
-    RuntimeErrorType,
-};
+use vm::database::ClarityDatabase;
+use vm::database::STXBalance;
+use vm::errors::{CheckErrors, InterpreterResult as Result};
+use vm::functions::tuples;
 use vm::representations::SymbolicExpression;
 use vm::types::{
     AssetIdentifier, BlockInfoProperty, BuffData, OptionalData, PrincipalData, TypeSignature, Value,
 };
 use vm::{eval, Environment, LocalContext};
 
-use vm::database::ClarityDatabase;
-use vm::database::STXBalance;
+use crate::util::errors::{InterpreterError, InterpreterFailureError, RuntimeErrorType};
+use crate::vm::analysis::check_argument_count;
 
 enum MintAssetErrorCodes {
     ALREADY_EXIST = 1,
@@ -309,7 +308,7 @@ pub fn special_mint_asset(
             &asset,
             expected_asset_type,
         ) {
-            Err(Error::Runtime(RuntimeErrorType::NoSuchToken, _)) => Ok(()),
+            Err(InterpreterError::Runtime(RuntimeErrorType::NoSuchToken, _)) => Ok(()),
             Ok(_owner) => return clarity_ecode!(MintAssetErrorCodes::ALREADY_EXIST),
             Err(e) => Err(e),
         }?;
@@ -379,7 +378,7 @@ pub fn special_transfer_asset(
             expected_asset_type,
         ) {
             Ok(owner) => Ok(owner),
-            Err(Error::Runtime(RuntimeErrorType::NoSuchToken, _)) => {
+            Err(InterpreterError::Runtime(RuntimeErrorType::NoSuchToken, _)) => {
                 return clarity_ecode!(TransferAssetErrorCodes::DOES_NOT_EXIST)
             }
             Err(e) => Err(e),
@@ -595,7 +594,7 @@ pub fn special_get_owner(
             Ok(Value::some(Value::Principal(owner))
                 .expect("Principal should always fit in optional."))
         }
-        Err(Error::Runtime(RuntimeErrorType::NoSuchToken, _)) => Ok(Value::none()),
+        Err(InterpreterError::Runtime(RuntimeErrorType::NoSuchToken, _)) => Ok(Value::none()),
         Err(e) => Err(e),
     }
 }
@@ -723,7 +722,7 @@ pub fn special_burn_asset(
             &asset,
             expected_asset_type,
         ) {
-            Err(Error::Runtime(RuntimeErrorType::NoSuchToken, _)) => {
+            Err(InterpreterError::Runtime(RuntimeErrorType::NoSuchToken, _)) => {
                 return clarity_ecode!(BurnAssetErrorCodes::DOES_NOT_EXIST)
             }
             Ok(owner) => Ok(owner),

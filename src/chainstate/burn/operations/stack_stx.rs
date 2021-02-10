@@ -16,6 +16,7 @@
 
 use std::io::{Read, Write};
 
+use crate::util::errors::NetworkError as net_error;
 use crate::util::messages::write_next;
 use crate::util::messages::StacksMessageCodec;
 use address::AddressHashMode;
@@ -38,7 +39,6 @@ use chainstate::stacks::index::storage::TrieFileStorage;
 use chainstate::stacks::index::TrieHash;
 use chainstate::stacks::{StacksAddress, StacksPrivateKey, StacksPublicKey};
 use core::POX_MAX_NUM_CYCLES;
-use net::Error as net_error;
 use util::hash::to_hex;
 use util::log;
 use util::vrf::{VRFPrivateKey, VRFPublicKey, VRF};

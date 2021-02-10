@@ -14,10 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use vm::ast::errors::{ParseError, ParseErrors, ParseResult};
+use crate::vm::ast::ParseResult;
 use vm::ast::types::{BuildASTPass, ContractAST};
 use vm::representations::PreSymbolicExpressionType::List;
 use vm::representations::SymbolicExpressionCommon;
+
+use crate::util::errors::{ParseError, ParseErrors};
 
 fn inner_relabel<T: SymbolicExpressionCommon>(args: &mut [T], index: u64) -> ParseResult<u64> {
     let mut current = index

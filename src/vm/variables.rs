@@ -15,13 +15,15 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::convert::TryFrom;
+
 use vm::contexts::{Environment, LocalContext};
-use vm::errors::{InterpreterResult as Result, RuntimeErrorType};
+use vm::costs::cost_functions::ClarityCostFunction;
+use vm::costs::runtime_cost;
+use vm::errors::InterpreterResult as Result;
 use vm::types::BuffData;
 use vm::types::Value;
 
-use vm::costs::cost_functions::ClarityCostFunction;
-use vm::costs::runtime_cost;
+use crate::util::errors::RuntimeErrorType;
 
 define_named_enum!(NativeVariables {
     ContractCaller("contract-caller"), TxSender("tx-sender"), BlockHeight("block-height"),

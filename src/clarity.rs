@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use rand::Rng;
 use std::convert::TryInto;
 use std::env;
 use std::fs;
@@ -23,24 +22,26 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process;
 
-use util::log;
-
-use chainstate::burn::BlockHeaderHash;
-use chainstate::stacks::index::{storage::TrieFileStorage, MarfTrieId};
-use chainstate::stacks::StacksBlockId;
-
+use rand::Rng;
 use rusqlite::types::ToSql;
 use rusqlite::Row;
 use rusqlite::Transaction;
 use rusqlite::{Connection, OpenFlags, NO_PARAMS};
+use serde::Serialize;
 
+use address::c32::c32_address;
+use burnchains::BurnchainHeaderHash;
+use chainstate::burn::BlockHeaderHash;
+use chainstate::burn::VRFSeed;
+use chainstate::stacks::index::{storage::TrieFileStorage, MarfTrieId};
+use chainstate::stacks::StacksAddress;
+use chainstate::stacks::StacksBlockId;
 use util::db::FromColumn;
-
 use util::hash::Sha512Trunc256Sum;
-
+use util::log;
 use vm::analysis;
 use vm::analysis::contract_interface_builder::build_contract_interface;
-use vm::analysis::{errors::CheckResult, AnalysisDatabase, ContractAnalysis};
+use vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use vm::ast::build_ast;
 use vm::contexts::OwnedEnvironment;
 use vm::costs::LimitedCostTracker;
@@ -48,18 +49,12 @@ use vm::database::{
     ClarityDatabase, HeadersDB, MarfedKV, MemoryBackingStore, STXBalance, SqliteConnection,
     NULL_BURN_STATE_DB, NULL_HEADER_DB,
 };
-use vm::errors::{Error, InterpreterResult, RuntimeErrorType};
+use vm::errors::InterpreterResult;
 use vm::types::{PrincipalData, QualifiedContractIdentifier};
 use vm::{execute as vm_execute, SymbolicExpression, SymbolicExpressionType, Value};
 
-use address::c32::c32_address;
-
-use burnchains::BurnchainHeaderHash;
-use chainstate::burn::VRFSeed;
-use chainstate::stacks::StacksAddress;
-
-use serde::Serialize;
-
+use crate::util::errors::{InterpreterError, RuntimeErrorType};
+use crate::vm::analysis::CheckResult;
 use crate::vm::database::marf::WritableMarfStore;
 
 #[cfg(test)]
@@ -123,7 +118,7 @@ struct EvalInput {
 fn parse(
     contract_identifier: &QualifiedContractIdentifier,
     source_code: &str,
-) -> Result<Vec<SymbolicExpression>, Error> {
+) -> Result<Vec<SymbolicExpression>, InterpreterError> {
     let ast = build_ast(contract_identifier, source_code, &mut ())
         .map_err(|e| RuntimeErrorType::ASTError(e))?;
     Ok(ast.expressions)
@@ -988,6 +983,7 @@ pub fn invoke_command(invoked_by: &str, args: &[String]) {
 #[cfg(test)]
 mod test {
     use super::*;
+
     #[test]
     fn test_initial_alloc() {
         let db_name = format!("/tmp/db_{}", rand::thread_rng().gen::<i32>());

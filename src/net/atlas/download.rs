@@ -1,4 +1,5 @@
 use super::{AtlasDB, Attachment, AttachmentInstance, MAX_ATTACHMENT_INV_PAGES_PER_REQUEST};
+use crate::util::errors::NetworkError as net_error;
 use chainstate::burn::{BlockHeaderHash, ConsensusHash};
 use chainstate::stacks::db::StacksChainState;
 use chainstate::stacks::{StacksBlockHeader, StacksBlockId};
@@ -6,7 +7,6 @@ use net::connection::ConnectionOptions;
 use net::dns::*;
 use net::p2p::PeerNetwork;
 use net::server::HttpPeer;
-use net::Error as net_error;
 use net::NeighborKey;
 use net::{GetAttachmentResponse, GetAttachmentsInvResponse};
 use net::{HttpRequestMetadata, HttpRequestType, HttpResponseType, PeerHost, Requestable};

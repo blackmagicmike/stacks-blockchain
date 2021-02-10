@@ -20,26 +20,23 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 
-use core::*;
-
+use crate::util::errors::ChainstateError;
 use chainstate::stacks::db::accounts::*;
 use chainstate::stacks::db::blocks::*;
 use chainstate::stacks::db::*;
 use chainstate::stacks::events::*;
-use chainstate::stacks::Error;
 use chainstate::stacks::*;
-
-use net::Error as net_error;
-use util::db::Error as db_error;
-
-use vm::clarity::{ClarityInstance, Error as clarity_error};
+use core::*;
+use vm::clarity::ClarityInstance;
+use vm::costs::ExecutionCost;
 use vm::database::marf::MarfedKV;
 use vm::database::BurnStateDB;
 use vm::database::HeadersDB;
 use vm::database::NULL_BURN_STATE_DB;
 use vm::database::NULL_HEADER_DB;
 
-use vm::costs::ExecutionCost;
+use crate::util::errors::NetworkError as net_error;
+use crate::util::errors::{ClarityError as clarity_error, DBError as db_error};
 
 pub type UnconfirmedTxMap = HashMap<Txid, (StacksTransaction, BlockHeaderHash, u16)>;
 
@@ -62,7 +59,10 @@ pub struct UnconfirmedState {
 impl UnconfirmedState {
     /// Make a new unconfirmed state, but don't do anything with it yet.  Caller should immediately
     /// call .refresh() to instatiate and store the underlying state trie.
-    fn new(chainstate: &StacksChainState, tip: StacksBlockId) -> Result<UnconfirmedState, Error> {
+    fn new(
+        chainstate: &StacksChainState,
+        tip: StacksBlockId,
+    ) -> Result<UnconfirmedState, ChainstateError> {
         let marf = MarfedKV::open_unconfirmed(&chainstate.clarity_state_index_root, None)?;
 
         let clarity_instance =
@@ -90,7 +90,7 @@ impl UnconfirmedState {
     fn new_readonly(
         chainstate: &StacksChainState,
         tip: StacksBlockId,
-    ) -> Result<UnconfirmedState, Error> {
+    ) -> Result<UnconfirmedState, ChainstateError> {
         let marf = MarfedKV::open_unconfirmed(&chainstate.clarity_state_index_root, None)?;
 
         let clarity_instance =
@@ -124,7 +124,7 @@ impl UnconfirmedState {
         chainstate: &StacksChainState,
         burn_dbconn: &dyn BurnStateDB,
         mblocks: Vec<StacksMicroblock>,
-    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), ChainstateError> {
         if self.last_mblock_seq == u16::max_value() {
             // drop them -- nothing to do
             return Ok((0, 0, vec![]));
@@ -184,7 +184,7 @@ impl UnconfirmedState {
                         &vec![mblock.clone()],
                     ) {
                         Ok(x) => x,
-                        Err((Error::InvalidStacksMicroblock(msg, _), hdr)) => {
+                        Err((ChainstateError::InvalidStacksMicroblock(msg, _), hdr)) => {
                             warn!("Invalid stacks microblock {}: {}", hdr, msg);
                             continue;
                         }
@@ -237,12 +237,12 @@ impl UnconfirmedState {
     fn load_child_microblocks(
         &self,
         chainstate: &StacksChainState,
-    ) -> Result<Option<Vec<StacksMicroblock>>, Error> {
+    ) -> Result<Option<Vec<StacksMicroblock>>, ChainstateError> {
         let (consensus_hash, anchored_block_hash) =
             match chainstate.get_block_header_hashes(&self.confirmed_chain_tip)? {
                 Some(x) => x,
                 None => {
-                    return Err(Error::NoSuchBlockError);
+                    return Err(ChainstateError::NoSuchBlockError);
                 }
             };
 
@@ -259,7 +259,7 @@ impl UnconfirmedState {
         &mut self,
         chainstate: &StacksChainState,
         burn_dbconn: &dyn BurnStateDB,
-    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), ChainstateError> {
         assert!(
             !self.readonly,
             "BUG: code tried to write unconfirmed state to a read-only instance"
@@ -342,7 +342,8 @@ impl StacksChainState {
         &self,
         burn_dbconn: &dyn BurnStateDB,
         anchored_block_id: StacksBlockId,
-    ) -> Result<(UnconfirmedState, u128, u128, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(UnconfirmedState, u128, u128, Vec<StacksTransactionReceipt>), ChainstateError>
+    {
         debug!("Make new unconfirmed state off of {}", &anchored_block_id);
         let mut unconfirmed_state = UnconfirmedState::new(self, anchored_block_id)?;
         let (fees, burns, receipts) = unconfirmed_state.refresh(self, burn_dbconn)?;
@@ -362,7 +363,7 @@ impl StacksChainState {
         &mut self,
         burn_dbconn: &dyn BurnStateDB,
         canonical_tip: StacksBlockId,
-    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), ChainstateError> {
         debug!("Reload unconfirmed state off of {}", &canonical_tip);
 
         let unconfirmed_state = self.unconfirmed_state.take();
@@ -410,7 +411,7 @@ impl StacksChainState {
     pub fn refresh_unconfirmed_state(
         &mut self,
         burn_dbconn: &dyn BurnStateDB,
-    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), ChainstateError> {
         let mut unconfirmed_state = self.unconfirmed_state.take();
         let res = if let Some(ref mut unconfirmed_state) = unconfirmed_state {
             if !unconfirmed_state.is_readable() {
@@ -444,7 +445,7 @@ impl StacksChainState {
     pub fn refresh_unconfirmed_readonly(
         &mut self,
         canonical_tip: StacksBlockId,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         if let Some(ref unconfirmed) = self.unconfirmed_state {
             assert!(
                 unconfirmed.readonly,
@@ -466,28 +467,24 @@ impl StacksChainState {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     use std::fs;
-
-    use crate::util::secp256k1::PublicKey;
-
-    use chainstate::stacks::index::marf::*;
-    use chainstate::stacks::index::node::*;
-    use chainstate::stacks::index::*;
-
-    use chainstate::stacks::db::test::*;
-    use chainstate::stacks::db::*;
-    use chainstate::stacks::miner::*;
-    use chainstate::stacks::*;
-
-    use net::test::*;
 
     use chainstate::burn::db::sortdb::*;
     use chainstate::burn::db::*;
-
+    use chainstate::stacks::db::test::*;
+    use chainstate::stacks::db::*;
+    use chainstate::stacks::index::marf::*;
+    use chainstate::stacks::index::node::*;
+    use chainstate::stacks::index::*;
     use chainstate::stacks::miner::test::make_coinbase;
+    use chainstate::stacks::miner::*;
+    use chainstate::stacks::*;
     use core::mempool::*;
+    use net::test::*;
+
+    use crate::util::secp256k1::PublicKey;
+
+    use super::*;
 
     #[test]
     fn test_unconfirmed_refresh_one_microblock_stx_transfer() {

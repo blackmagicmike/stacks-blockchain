@@ -55,37 +55,38 @@ use rusqlite::{
 
 use std::convert::{TryFrom, TryInto};
 
-use chainstate::stacks::index::Error;
+use crate::util::errors::MarfError;
 
+use crate::util::errors::DBError as db_error;
 use util::db::tx_begin_immediate;
 use util::db::tx_busy_handler;
-use util::db::Error as db_error;
 use util::log;
 
-pub fn ftell<F: Seek>(f: &mut F) -> Result<u64, Error> {
-    f.seek(SeekFrom::Current(0)).map_err(Error::IOError)
+pub fn ftell<F: Seek>(f: &mut F) -> Result<u64, MarfError> {
+    f.seek(SeekFrom::Current(0)).map_err(MarfError::IOError)
 }
 
-pub fn fseek<F: Seek>(f: &mut F, off: u64) -> Result<u64, Error> {
-    f.seek(SeekFrom::Start(off)).map_err(Error::IOError)
+pub fn fseek<F: Seek>(f: &mut F, off: u64) -> Result<u64, MarfError> {
+    f.seek(SeekFrom::Start(off)).map_err(MarfError::IOError)
 }
 
-pub fn fseek_end<F: Seek>(f: &mut F) -> Result<u64, Error> {
-    f.seek(SeekFrom::End(0)).map_err(Error::IOError)
+pub fn fseek_end<F: Seek>(f: &mut F) -> Result<u64, MarfError> {
+    f.seek(SeekFrom::End(0)).map_err(MarfError::IOError)
 }
 
 trait NodeHashReader {
-    fn read_node_hash_bytes<W: Write>(&mut self, ptr: &TriePtr, w: &mut W) -> Result<(), Error>;
+    fn read_node_hash_bytes<W: Write>(&mut self, ptr: &TriePtr, w: &mut W)
+        -> Result<(), MarfError>;
 }
 
 impl<T: MarfTrieId> BlockMap for TrieFileStorage<T> {
     type TrieId = T;
 
-    fn get_block_hash(&self, id: u32) -> Result<T, Error> {
+    fn get_block_hash(&self, id: u32) -> Result<T, MarfError> {
         trie_sql::get_block_hash(&self.db, id)
     }
 
-    fn get_block_hash_caching(&mut self, id: u32) -> Result<&T, Error> {
+    fn get_block_hash_caching(&mut self, id: u32) -> Result<&T, MarfError> {
         if !self.data.block_hash_cache.contains_key(&id) {
             self.data
                 .block_hash_cache
@@ -98,11 +99,11 @@ impl<T: MarfTrieId> BlockMap for TrieFileStorage<T> {
 impl<'a, T: MarfTrieId> BlockMap for TrieStorageConnection<'a, T> {
     type TrieId = T;
 
-    fn get_block_hash(&self, id: u32) -> Result<T, Error> {
+    fn get_block_hash(&self, id: u32) -> Result<T, MarfError> {
         trie_sql::get_block_hash(&self.db, id)
     }
 
-    fn get_block_hash_caching(&mut self, id: u32) -> Result<&T, Error> {
+    fn get_block_hash_caching(&mut self, id: u32) -> Result<&T, MarfError> {
         if !self.data.block_hash_cache.contains_key(&id) {
             self.data
                 .block_hash_cache
@@ -115,11 +116,11 @@ impl<'a, T: MarfTrieId> BlockMap for TrieStorageConnection<'a, T> {
 impl<'a, T: MarfTrieId> BlockMap for TrieStorageTransaction<'a, T> {
     type TrieId = T;
 
-    fn get_block_hash(&self, id: u32) -> Result<T, Error> {
+    fn get_block_hash(&self, id: u32) -> Result<T, MarfError> {
         self.deref().get_block_hash(id)
     }
 
-    fn get_block_hash_caching(&mut self, id: u32) -> Result<&T, Error> {
+    fn get_block_hash_caching(&mut self, id: u32) -> Result<&T, MarfError> {
         self.deref_mut().get_block_hash_caching(id)
     }
 }
@@ -127,11 +128,11 @@ impl<'a, T: MarfTrieId> BlockMap for TrieStorageTransaction<'a, T> {
 impl<T: MarfTrieId> BlockMap for TrieSqlHashMapCursor<'_, T> {
     type TrieId = T;
 
-    fn get_block_hash(&self, id: u32) -> Result<T, Error> {
+    fn get_block_hash(&self, id: u32) -> Result<T, MarfError> {
         trie_sql::get_block_hash(&self.db, id)
     }
 
-    fn get_block_hash_caching(&mut self, id: u32) -> Result<&T, Error> {
+    fn get_block_hash_caching(&mut self, id: u32) -> Result<&T, MarfError> {
         if !self.cache.contains_key(&id) {
             self.cache.insert(id, self.get_block_hash(id)?);
         }
@@ -264,18 +265,18 @@ impl<T: MarfTrieId> TrieRAM<T> {
         node_data: &[(TrieNodeType, TrieHash)],
         offsets: &[u32],
         parent_hash: &T,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         assert_eq!(node_data.len(), offsets.len());
 
         // write parent block ptr
         fseek(f, 0)?;
         f.write_all(parent_hash.as_bytes())
-            .map_err(|e| Error::IOError(e))?;
+            .map_err(|e| MarfError::IOError(e))?;
         // write zero-identifier (TODO: this is a convenience hack for now, we should remove the
         //    identifier from the trie data blob)
         fseek(f, BLOCK_HEADER_HASH_ENCODED_SIZE as u64)?;
         f.write_all(&0u32.to_le_bytes())
-            .map_err(|e| Error::IOError(e))?;
+            .map_err(|e| MarfError::IOError(e))?;
 
         for i in 0..node_data.len() {
             // dump the node to storage
@@ -296,18 +297,18 @@ impl<T: MarfTrieId> TrieRAM<T> {
         node_data: &[(TrieNodeType, TrieHash)],
         offsets: &[u32],
         parent_hash: &T,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         assert_eq!(node_data_order.len(), offsets.len());
 
         // write parent block ptr
         fseek(f, 0)?;
         f.write_all(parent_hash.as_bytes())
-            .map_err(|e| Error::IOError(e))?;
+            .map_err(|e| MarfError::IOError(e))?;
         // write zero-identifier (TODO: this is a convenience hack for now, we should remove the
         //    identifier from the trie data blob)
         fseek(f, BLOCK_HEADER_HASH_ENCODED_SIZE as u64)?;
         f.write_all(&0u32.to_le_bytes())
-            .map_err(|e| Error::IOError(e))?;
+            .map_err(|e| MarfError::IOError(e))?;
 
         for (ix, indirect) in node_data_order.iter().enumerate() {
             // dump the node to storage
@@ -325,7 +326,7 @@ impl<T: MarfTrieId> TrieRAM<T> {
     }
 
     /// Walk through the buffered TrieNodes and dump them to f.
-    fn dump_consume<F: Write + Seek>(mut self, f: &mut F) -> Result<u64, Error> {
+    fn dump_consume<F: Write + Seek>(mut self, f: &mut F) -> Result<u64, MarfError> {
         let mut frontier: VecDeque<u32> = VecDeque::new();
 
         let mut node_data = vec![];
@@ -391,19 +392,19 @@ impl<T: MarfTrieId> TrieRAM<T> {
     }
 
     /// Dump ourself to f
-    pub fn dump<F: Write + Seek>(self, f: &mut F, bhh: &T) -> Result<u64, Error> {
+    pub fn dump<F: Write + Seek>(self, f: &mut F, bhh: &T) -> Result<u64, MarfError> {
         if self.block_header == *bhh {
             self.dump_consume(f)
         } else {
             error!("Failed to dump {:?}: not the current block", bhh);
-            Err(Error::NotFoundError)
+            Err(MarfError::NotFoundError)
         }
     }
 
     /// load the trie from F.
     /// The trie will have the same structure as the on-disk trie, but it may have nodes in a
     /// different order.
-    pub fn load<F: Read + Seek>(f: &mut F, bhh: &T) -> Result<TrieRAM<T>, Error> {
+    pub fn load<F: Read + Seek>(f: &mut F, bhh: &T) -> Result<TrieRAM<T>, MarfError> {
         let mut data = vec![];
         let mut frontier = VecDeque::new();
 
@@ -434,7 +435,7 @@ impl<T: MarfTrieId> TrieRAM<T> {
                 }
             }
         } else {
-            return Err(Error::CorruptionError(
+            return Err(MarfError::CorruptionError(
                 "First TrieRAM node is not a Node256".to_string(),
             ));
         }
@@ -485,30 +486,30 @@ impl<T: MarfTrieId> TrieRAM<T> {
         //  NOT bytes. this led to enormous over-allocations
     }
 
-    pub fn format(&mut self) -> Result<(), Error> {
+    pub fn format(&mut self) -> Result<(), MarfError> {
         if self.readonly {
             trace!("Read-only!");
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
 
         self.data.clear();
         Ok(())
     }
 
-    pub fn read_node_hash(&self, ptr: &TriePtr) -> Result<TrieHash, Error> {
+    pub fn read_node_hash(&self, ptr: &TriePtr) -> Result<TrieHash, MarfError> {
         let (_, node_trie_hash) = self.data.get(ptr.ptr() as usize).ok_or_else(|| {
             error!(
                 "TrieRAM: Failed to read node bytes: {} >= {}",
                 ptr.ptr(),
                 self.data.len()
             );
-            Error::NotFoundError
+            MarfError::NotFoundError
         })?;
 
         Ok(node_trie_hash.clone())
     }
 
-    pub fn get_nodetype(&self, ptr: u32) -> Result<&(TrieNodeType, TrieHash), Error> {
+    pub fn get_nodetype(&self, ptr: u32) -> Result<&(TrieNodeType, TrieHash), MarfError> {
         self.data.get(ptr as usize).ok_or_else(|| {
             error!(
                 "TrieRAM read_nodetype({:?}): Failed to read node: {} >= {}",
@@ -516,11 +517,11 @@ impl<T: MarfTrieId> TrieRAM<T> {
                 ptr,
                 self.data.len()
             );
-            Error::NotFoundError
+            MarfError::NotFoundError
         })
     }
 
-    pub fn read_nodetype(&mut self, ptr: &TriePtr) -> Result<(TrieNodeType, TrieHash), Error> {
+    pub fn read_nodetype(&mut self, ptr: &TriePtr) -> Result<(TrieNodeType, TrieHash), MarfError> {
         trace!(
             "TrieRAM: read_nodetype({:?}): at {:?}",
             &self.block_header,
@@ -544,7 +545,7 @@ impl<T: MarfTrieId> TrieRAM<T> {
                 ptr.ptr(),
                 self.data.len()
             );
-            Err(Error::NotFoundError)
+            Err(MarfError::NotFoundError)
         } else {
             Ok(self.data[ptr.ptr() as usize].clone())
         }
@@ -555,10 +556,10 @@ impl<T: MarfTrieId> TrieRAM<T> {
         node_array_ptr: u32,
         node: &TrieNodeType,
         hash: TrieHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         if self.readonly {
             trace!("Read-only!");
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
 
         trace!(
@@ -588,25 +589,29 @@ impl<T: MarfTrieId> TrieRAM<T> {
             Ok(())
         } else {
             error!("Failed to write node bytes: off the end of the buffer");
-            Err(Error::NotFoundError)
+            Err(MarfError::NotFoundError)
         }
     }
 
     /// Get the next ptr value for a node to store.
-    pub fn last_ptr(&mut self) -> Result<u32, Error> {
+    pub fn last_ptr(&mut self) -> Result<u32, MarfError> {
         Ok(self.data.len() as u32)
     }
 }
 
 impl<T: MarfTrieId> NodeHashReader for TrieRAM<T> {
-    fn read_node_hash_bytes<W: Write>(&mut self, ptr: &TriePtr, w: &mut W) -> Result<(), Error> {
+    fn read_node_hash_bytes<W: Write>(
+        &mut self,
+        ptr: &TriePtr,
+        w: &mut W,
+    ) -> Result<(), MarfError> {
         let (_, node_trie_hash) = self.data.get(ptr.ptr() as usize).ok_or_else(|| {
             error!(
                 "TrieRAM: Failed to read node bytes: {} >= {}",
                 ptr.ptr(),
                 self.data.len()
             );
-            Error::NotFoundError
+            MarfError::NotFoundError
         })?;
         w.write_all(node_trie_hash.as_bytes())?;
         Ok(())
@@ -624,7 +629,11 @@ pub struct TrieSqlHashMapCursor<'a, T: MarfTrieId> {
 }
 
 impl NodeHashReader for TrieSqlCursor<'_> {
-    fn read_node_hash_bytes<W: Write>(&mut self, ptr: &TriePtr, w: &mut W) -> Result<(), Error> {
+    fn read_node_hash_bytes<W: Write>(
+        &mut self,
+        ptr: &TriePtr,
+        w: &mut W,
+    ) -> Result<(), MarfError> {
         trie_sql::read_node_hash_bytes(self.db, w, self.block_id, ptr)
     }
 }
@@ -740,9 +749,9 @@ impl<T: MarfTrieId> TrieFileStorage<T> {
         }
     }
 
-    pub fn transaction<'a>(&'a mut self) -> Result<TrieStorageTransaction<'a, T>, Error> {
+    pub fn transaction<'a>(&'a mut self) -> Result<TrieStorageTransaction<'a, T>, MarfError> {
         if self.readonly() {
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
         let tx = tx_begin_immediate(&mut self.db)?;
 
@@ -768,7 +777,7 @@ impl<T: MarfTrieId> TrieFileStorage<T> {
         db_path: &str,
         readonly: bool,
         unconfirmed: bool,
-    ) -> Result<TrieFileStorage<T>, Error> {
+    ) -> Result<TrieFileStorage<T>, MarfError> {
         let mut create_flag = false;
         let open_flags = if db_path != ":memory:" {
             match fs::metadata(db_path) {
@@ -779,10 +788,10 @@ impl<T: MarfTrieId> TrieFileStorage<T> {
                             create_flag = true;
                             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
                         } else {
-                            return Err(Error::NotFoundError);
+                            return Err(MarfError::NotFoundError);
                         }
                     } else {
-                        return Err(Error::IOError(e));
+                        return Err(MarfError::IOError(e));
                     }
                 }
                 Ok(_md) => {
@@ -849,19 +858,19 @@ impl<T: MarfTrieId> TrieFileStorage<T> {
     }
 
     #[cfg(test)]
-    pub fn new_memory() -> Result<TrieFileStorage<T>, Error> {
+    pub fn new_memory() -> Result<TrieFileStorage<T>, MarfError> {
         TrieFileStorage::open(":memory:")
     }
 
-    pub fn open(db_path: &str) -> Result<TrieFileStorage<T>, Error> {
+    pub fn open(db_path: &str) -> Result<TrieFileStorage<T>, MarfError> {
         TrieFileStorage::open_opts(db_path, false, false)
     }
 
-    pub fn open_readonly(db_path: &str) -> Result<TrieFileStorage<T>, Error> {
+    pub fn open_readonly(db_path: &str) -> Result<TrieFileStorage<T>, MarfError> {
         TrieFileStorage::open_opts(db_path, true, false)
     }
 
-    pub fn open_unconfirmed(db_path: &str) -> Result<TrieFileStorage<T>, Error> {
+    pub fn open_unconfirmed(db_path: &str) -> Result<TrieFileStorage<T>, MarfError> {
         TrieFileStorage::open_opts(db_path, false, true)
     }
 
@@ -873,7 +882,7 @@ impl<T: MarfTrieId> TrieFileStorage<T> {
         self.data.unconfirmed
     }
 
-    pub fn reopen_readonly(&self) -> Result<TrieFileStorage<T>, Error> {
+    pub fn reopen_readonly(&self) -> Result<TrieFileStorage<T>, MarfError> {
         let db = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         db.busy_handler(Some(tx_busy_handler))?;
 
@@ -918,7 +927,7 @@ impl<T: MarfTrieId> TrieFileStorage<T> {
 impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
     /// reopen this transaction as a read-only marf.
     ///  _does not_ preserve the cur_block/open tip
-    pub fn reopen_readonly(&self) -> Result<TrieFileStorage<T>, Error> {
+    pub fn reopen_readonly(&self) -> Result<TrieFileStorage<T>, MarfError> {
         let db = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         db.busy_handler(Some(tx_busy_handler))?;
 
@@ -962,7 +971,7 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
         Ok(ret)
     }
 
-    fn inner_flush(&mut self, flush_options: FlushOptions<'_, T>) -> Result<(), Error> {
+    fn inner_flush(&mut self, flush_options: FlushOptions<'_, T>) -> Result<(), MarfError> {
         // save the currently-buffered Trie to disk, and atomically put it into place (possibly to
         // a different block than the one opened, as indicated by final_bhh).
         // Runs once -- subsequent calls are no-ops.
@@ -970,7 +979,7 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
         // fails).
         self.clear_cached_ancestor_hashes_bytes();
         if self.data.readonly {
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
         if let Some((bhh, trie_ram)) = self.data.last_extended.take() {
             trace!("Buffering block flush started.");
@@ -985,7 +994,7 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
             let block_id = match flush_options {
                 FlushOptions::CurrentHeader => {
                     if self.data.unconfirmed {
-                        return Err(Error::UnconfirmedError);
+                        return Err(MarfError::UnconfirmedError);
                     }
                     trie_sql::write_trie_blob(&self.db, &bhh, &buffer)?
                 }
@@ -997,7 +1006,7 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
                     // will process a block as if it's hash is all 0's (in order to validate the state root), and
                     // then use this method to switch over the block hash to the "real" block hash.
                     if self.data.unconfirmed {
-                        return Err(Error::UnconfirmedError);
+                        return Err(MarfError::UnconfirmedError);
                     }
                     if real_bhh != &bhh {
                         // note: this was moved from the block_retarget function
@@ -1010,13 +1019,13 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
                 }
                 FlushOptions::MinedTable(real_bhh) => {
                     if self.data.unconfirmed {
-                        return Err(Error::UnconfirmedError);
+                        return Err(MarfError::UnconfirmedError);
                     }
                     trie_sql::write_trie_blob_to_mined(&self.db, real_bhh, &buffer)?
                 }
                 FlushOptions::UnconfirmedTable => {
                     if !self.data.unconfirmed {
-                        return Err(Error::UnconfirmedError);
+                        return Err(MarfError::UnconfirmedError);
                     }
                     trie_sql::write_trie_blob_to_unconfirmed(&self.db, &bhh, &buffer)?
                 }
@@ -1030,7 +1039,7 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
         Ok(())
     }
 
-    pub fn flush(&mut self) -> Result<(), Error> {
+    pub fn flush(&mut self) -> Result<(), MarfError> {
         if self.data.unconfirmed {
             self.inner_flush(FlushOptions::UnconfirmedTable)
         } else {
@@ -1038,11 +1047,11 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
         }
     }
 
-    pub fn flush_to(&mut self, bhh: &T) -> Result<(), Error> {
+    pub fn flush_to(&mut self, bhh: &T) -> Result<(), MarfError> {
         self.inner_flush(FlushOptions::NewHeader(bhh))
     }
 
-    pub fn flush_mined(&mut self, bhh: &T) -> Result<(), Error> {
+    pub fn flush_mined(&mut self, bhh: &T) -> Result<(), MarfError> {
         self.inner_flush(FlushOptions::MinedTable(bhh))
     }
 
@@ -1075,18 +1084,18 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
     /// Extend the forest of Tries to include a new confirmed block.
     /// Fails if the block already exists, or if the storage is read-only, or open
     /// only for unconfirmed state.
-    pub fn extend_to_block(&mut self, bhh: &T) -> Result<(), Error> {
+    pub fn extend_to_block(&mut self, bhh: &T) -> Result<(), MarfError> {
         self.clear_cached_ancestor_hashes_bytes();
         if self.data.readonly {
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
         if self.data.unconfirmed {
-            return Err(Error::UnconfirmedError);
+            return Err(MarfError::UnconfirmedError);
         }
 
         if trie_sql::get_block_identifier(&self.db, bhh).is_ok() {
             warn!("Block already exists: {}", &bhh);
-            return Err(Error::ExistsError);
+            return Err(MarfError::ExistsError);
         }
 
         self.flush()?;
@@ -1101,7 +1110,7 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
         // place a lock on this block, so we can't extend to it again
         if !trie_sql::lock_bhh_for_extension(self.sqlite_tx(), bhh, false)? {
             warn!("Block already extended: {}", &bhh);
-            return Err(Error::ExistsError);
+            return Err(MarfError::ExistsError);
         }
 
         self.switch_trie(bhh, trie_buf);
@@ -1111,10 +1120,10 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
     /// Extend the forest of Tries to include a new unconfirmed block.
     /// If the unconfirmed block (bhh) already exists, then load up its trie as the last_extended
     /// trie.
-    pub fn extend_to_unconfirmed_block(&mut self, bhh: &T) -> Result<bool, Error> {
+    pub fn extend_to_unconfirmed_block(&mut self, bhh: &T) -> Result<bool, MarfError> {
         self.clear_cached_ancestor_hashes_bytes();
         if !self.data.unconfirmed {
-            return Err(Error::UnconfirmedError);
+            return Err(MarfError::UnconfirmedError);
         }
 
         self.flush()?;
@@ -1142,16 +1151,16 @@ impl<'a, T: MarfTrieId> TrieStorageTransaction<'a, T> {
         // place a lock on this block, so we can't extend to it again
         if !trie_sql::tx_lock_bhh_for_extension(&self.db, bhh, true)? {
             warn!("Block already extended: {}", &bhh);
-            return Err(Error::ExistsError);
+            return Err(MarfError::ExistsError);
         }
 
         self.switch_trie(bhh, trie_buf);
         Ok(created)
     }
 
-    pub fn format(&mut self) -> Result<(), Error> {
+    pub fn format(&mut self) -> Result<(), MarfError> {
         if self.data.readonly {
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
 
         debug!("Format TrieFileStorage");
@@ -1238,7 +1247,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         self.data.trie_ancestor_hash_bytes_cache = None;
     }
 
-    pub fn get_root_hash_at(&mut self, tip: &T) -> Result<TrieHash, Error> {
+    pub fn get_root_hash_at(&mut self, tip: &T) -> Result<TrieHash, MarfError> {
         let cur_block_hash = self.get_cur_block();
 
         self.open_block(tip)?;
@@ -1293,7 +1302,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
 
     /// Recover from partially-written state -- i.e. blow it away.
     /// Doesn't get called automatically.
-    pub fn recover(db_path: &String) -> Result<(), Error> {
+    pub fn recover(db_path: &String) -> Result<(), MarfError> {
         let conn = Connection::open(db_path)?;
         conn.busy_handler(Some(tx_busy_handler))?;
 
@@ -1302,7 +1311,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
 
     /// Read the Trie root node's hash from the block table.
     #[cfg(test)]
-    pub fn read_block_root_hash(&self, bhh: &T) -> Result<TrieHash, Error> {
+    pub fn read_block_root_hash(&self, bhh: &T) -> Result<TrieHash, MarfError> {
         let root_hash_ptr = TriePtr::new(
             TrieNodeID::Node256 as u8,
             0,
@@ -1313,7 +1322,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
 
     /// Generate a mapping between Trie root hashes and the blocks that contain them
     #[cfg(test)]
-    pub fn read_root_to_block_table(&mut self) -> Result<HashMap<TrieHash, T>, Error> {
+    pub fn read_root_to_block_table(&mut self) -> Result<HashMap<TrieHash, T>, MarfError> {
         let mut ret =
             HashMap::from_iter(trie_sql::read_all_block_hashes_and_roots(&self.db)?.into_iter());
 
@@ -1346,7 +1355,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         self.data.last_extended = Some((bhh.clone(), trie_buf));
     }
 
-    pub fn has_confirmed_block(&self, bhh: &T) -> Result<bool, Error> {
+    pub fn has_confirmed_block(&self, bhh: &T) -> Result<bool, MarfError> {
         match trie_sql::get_confirmed_block_identifier(&self.db, bhh) {
             Ok(Some(_)) => Ok(true),
             Ok(None) => Ok(false),
@@ -1354,7 +1363,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         }
     }
 
-    pub fn has_unconfirmed_block(&self, bhh: &T) -> Result<bool, Error> {
+    pub fn has_unconfirmed_block(&self, bhh: &T) -> Result<bool, MarfError> {
         match trie_sql::get_unconfirmed_block_identifier(&self.db, bhh) {
             Ok(Some(_)) => Ok(true),
             Ok(None) => Ok(false),
@@ -1362,14 +1371,14 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         }
     }
 
-    pub fn has_block(&self, bhh: &T) -> Result<bool, Error> {
+    pub fn has_block(&self, bhh: &T) -> Result<bool, MarfError> {
         Ok(self.has_confirmed_block(bhh)? || self.has_unconfirmed_block(bhh)?)
     }
 
     // used for providing a option<block identifier> when re-opening a block --
     //   because the previously open block may have been the last_extended block,
     //   id may have been None.
-    pub fn open_block_maybe_id(&mut self, bhh: &T, id: Option<u32>) -> Result<(), Error> {
+    pub fn open_block_maybe_id(&mut self, bhh: &T, id: Option<u32>) -> Result<(), MarfError> {
         match id {
             Some(id) => self.open_block_known_id(bhh, id),
             None => self.open_block(bhh),
@@ -1378,7 +1387,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
 
     // used for providing a block identifier when opening a block -- usually used
     //   when following a backptr, which stores the block identifier directly.
-    pub fn open_block_known_id(&mut self, bhh: &T, id: u32) -> Result<(), Error> {
+    pub fn open_block_known_id(&mut self, bhh: &T, id: u32) -> Result<(), MarfError> {
         if *bhh == self.data.cur_block && self.data.cur_block_id.is_some() {
             // no-op
             return Ok(());
@@ -1397,7 +1406,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         Ok(())
     }
 
-    pub fn open_block(&mut self, bhh: &T) -> Result<(), Error> {
+    pub fn open_block(&mut self, bhh: &T) -> Result<(), MarfError> {
         if *bhh == self.data.cur_block && self.data.cur_block_id.is_some() {
             // no-op
             return Ok(());
@@ -1442,14 +1451,16 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         trie_sql::get_block_identifier(&self.db, bhh).ok()
     }
 
-    pub fn get_cur_block_identifier(&mut self) -> Result<u32, Error> {
+    pub fn get_cur_block_identifier(&mut self) -> Result<u32, MarfError> {
         if let Some((ref last_extended, _)) = self.data.last_extended {
             if &self.data.cur_block == last_extended {
-                return Err(Error::RequestedIdentifierForExtensionTrie);
+                return Err(MarfError::RequestedIdentifierForExtensionTrie);
             }
         }
 
-        self.data.cur_block_id.ok_or_else(|| Error::NotOpenedError)
+        self.data
+            .cur_block_id
+            .ok_or_else(|| MarfError::NotOpenedError)
     }
 
     pub fn get_cur_block(&self) -> T {
@@ -1460,7 +1471,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         (self.data.cur_block.clone(), self.data.cur_block_id.clone())
     }
 
-    pub fn get_block_from_local_id(&mut self, local_id: u32) -> Result<&T, Error> {
+    pub fn get_block_from_local_id(&mut self, local_id: u32) -> Result<&T, MarfError> {
         self.get_block_hash_caching(local_id)
     }
 
@@ -1507,9 +1518,9 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         &mut self,
         node: &TrieNodeType,
         w: &mut W,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         if self.data.readonly {
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
 
         trace!("get_children_hashes_bytes for {:?}", node);
@@ -1536,7 +1547,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
             db: &self.db,
             block_id: self.data.cur_block_id.ok_or_else(|| {
                 error!("Failed to get cur block as hash reader");
-                Error::NotFoundError
+                MarfError::NotFoundError
             })?,
         };
 
@@ -1548,7 +1559,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         map: &mut M,
         node: &TrieNodeType,
         w: &mut W,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         for ptr in node.ptrs().iter() {
             if ptr.id() == TrieNodeID::Empty as u8 {
                 // hash of empty string
@@ -1569,7 +1580,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         Ok(())
     }
 
-    pub fn read_node_hash_bytes(&mut self, ptr: &TriePtr) -> Result<TrieHash, Error> {
+    pub fn read_node_hash_bytes(&mut self, ptr: &TriePtr) -> Result<TrieHash, MarfError> {
         if let Some((ref last_extended, ref mut trie_ram)) = self.data.last_extended {
             // special case
             if &self.data.cur_block == last_extended {
@@ -1582,13 +1593,13 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
             Some(block_id) => trie_sql::get_node_hash_bytes(&self.db, block_id, ptr),
             None => {
                 error!("Not found (no file is open)");
-                Err(Error::NotFoundError)
+                Err(MarfError::NotFoundError)
             }
         }
     }
 
     // NOTE: ptr will not be treated as a backptr
-    pub fn read_nodetype(&mut self, ptr: &TriePtr) -> Result<(TrieNodeType, TrieHash), Error> {
+    pub fn read_nodetype(&mut self, ptr: &TriePtr) -> Result<(TrieNodeType, TrieHash), MarfError> {
         trace!("read_nodetype({:?}): {:?}", &self.data.cur_block, ptr);
 
         self.data.read_count += 1;
@@ -1614,7 +1625,7 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
             Some(id) => trie_sql::read_node_type(&self.db, id, &clear_ptr),
             None => {
                 debug!("Not found (no file is open)");
-                Err(Error::NotFoundError)
+                Err(MarfError::NotFoundError)
             }
         }
     }
@@ -1624,9 +1635,9 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         disk_ptr: u32,
         node: &TrieNodeType,
         hash: TrieHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         if self.data.readonly {
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
 
         trace!(
@@ -1662,16 +1673,16 @@ impl<'a, T: MarfTrieId> TrieStorageConnection<'a, T> {
         ptr: u32,
         node: &N,
         hash: TrieHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         if self.data.readonly {
-            return Err(Error::ReadOnlyError);
+            return Err(MarfError::ReadOnlyError);
         }
 
         let node_type = node.as_trie_node_type();
         self.write_nodetype(ptr, &node_type, hash)
     }
 
-    pub fn last_ptr(&mut self) -> Result<u32, Error> {
+    pub fn last_ptr(&mut self) -> Result<u32, MarfError> {
         if let Some((_, ref mut trie_ram)) = self.data.last_extended {
             trie_ram.last_ptr()
         } else {

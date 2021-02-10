@@ -14,32 +14,32 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::convert::TryInto;
 use std::path::PathBuf;
+
+use rusqlite::Connection;
 
 use burnchains::BurnchainHeaderHash;
 use chainstate::burn::{BlockHeaderHash, VRFSeed};
 use chainstate::stacks::index::marf::{MarfConnection, MarfTransaction, MARF};
 use chainstate::stacks::index::proofs::TrieMerkleProof;
 use chainstate::stacks::index::storage::TrieFileStorage;
-use chainstate::stacks::index::{Error as MarfError, MARFValue, MarfTrieId, TrieHash};
+use chainstate::stacks::index::{MARFValue, MarfTrieId, TrieHash};
 use chainstate::stacks::{StacksBlockHeader, StacksBlockId};
-use rusqlite::Connection;
-use std::convert::TryInto;
+use core::{FIRST_BURNCHAIN_CONSENSUS_HASH, FIRST_STACKS_BLOCK_HASH};
+use util::db::IndexDBConn;
 use util::hash::{hex_bytes, to_hex, Hash160, Sha512Trunc256Sum};
 use vm::analysis::AnalysisDatabase;
 use vm::database::{
     BurnStateDB, ClarityDatabase, ClarityDeserializable, ClaritySerializable, HeadersDB,
     SqliteConnection, NULL_BURN_STATE_DB, NULL_HEADER_DB,
 };
-use vm::errors::{
-    CheckErrors, IncomparableError, InterpreterError, InterpreterResult as Result,
-    InterpreterResult, RuntimeErrorType,
-};
+use vm::errors::{CheckErrors, InterpreterResult as Result, InterpreterResult};
 use vm::types::QualifiedContractIdentifier;
 
-use util::db::IndexDBConn;
-
-use core::{FIRST_BURNCHAIN_CONSENSUS_HASH, FIRST_STACKS_BLOCK_HASH};
+use crate::util::errors::{
+    IncomparableError, InterpreterFailureError, MarfError, RuntimeErrorType,
+};
 
 /// The MarfedKV struct is used to wrap a MARF data structure and side-storage
 ///   for use as a K/V store for ClarityDB or the AnalysisDB.
@@ -207,20 +207,20 @@ impl MarfedKV {
         let mut path = PathBuf::from(path_str);
 
         std::fs::create_dir_all(&path)
-            .map_err(|_| InterpreterError::FailedToCreateDataDirectory)?;
+            .map_err(|_| InterpreterFailureError::FailedToCreateDataDirectory)?;
 
         path.push("marf");
         let marf_path = path
             .to_str()
-            .ok_or_else(|| InterpreterError::BadFileName)?
+            .ok_or_else(|| InterpreterFailureError::BadFileName)?
             .to_string();
 
         let mut marf: MARF<StacksBlockId> = if unconfirmed {
             MARF::from_path_unconfirmed(&marf_path)
-                .map_err(|err| InterpreterError::MarfFailure(IncomparableError { err }))?
+                .map_err(|err| InterpreterFailureError::MarfFailure(IncomparableError { err }))?
         } else {
             MARF::from_path(&marf_path)
-                .map_err(|err| InterpreterError::MarfFailure(IncomparableError { err }))?
+                .map_err(|err| InterpreterFailureError::MarfFailure(IncomparableError { err }))?
         };
 
         if SqliteConnection::check_schema(&marf.sqlite_conn()).is_ok() {
@@ -230,11 +230,11 @@ impl MarfedKV {
 
         let tx = marf
             .storage_tx()
-            .map_err(|err| InterpreterError::DBError(IncomparableError { err }))?;
+            .map_err(|err| InterpreterFailureError::DBError(IncomparableError { err }))?;
 
         SqliteConnection::initialize_conn(&tx)?;
         tx.commit()
-            .map_err(|err| InterpreterError::SqliteError(IncomparableError { err }))?;
+            .map_err(|err| InterpreterFailureError::SqliteError(IncomparableError { err }))?;
 
         Ok(marf)
     }
@@ -312,7 +312,7 @@ impl MarfedKV {
                     "Failed to open read only connection at {}: {:?}",
                     at_block, &e
                 );
-                InterpreterError::MarfFailure(IncomparableError {
+                InterpreterFailureError::MarfFailure(IncomparableError {
                     err: MarfError::NotFoundError,
                 })
             })?;

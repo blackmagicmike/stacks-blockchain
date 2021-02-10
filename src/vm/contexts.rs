@@ -19,19 +19,27 @@ use std::convert::TryInto;
 use std::fmt;
 use std::mem::replace;
 
+use serde::Serialize;
+
+use chainstate::burn::{BlockHeaderHash, VRFSeed};
+use chainstate::stacks::db::StacksChainState;
+use chainstate::stacks::events::*;
+use chainstate::stacks::StacksBlockId;
+use chainstate::stacks::StacksMicroblockHeader;
 use vm::ast;
 use vm::ast::ContractAST;
 use vm::callables::{DefinedFunction, FunctionIdentifier};
 use vm::contracts::Contract;
+use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{
-    cost_functions, runtime_cost, ClarityCostFunctionReference, CostErrors, CostTracker,
-    ExecutionCost, LimitedCostTracker,
+    cost_functions, runtime_cost, ClarityCostFunctionReference, CostTracker, ExecutionCost,
+    LimitedCostTracker,
 };
 use vm::database::{
     ClarityDatabase, DataMapMetadata, DataVariableMetadata, FungibleTokenMetadata,
     NonFungibleTokenMetadata,
 };
-use vm::errors::{CheckErrors, InterpreterError, InterpreterResult as Result, RuntimeErrorType};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
 use vm::functions::handle_contract_call_special_cases;
 use vm::representations::{ClarityName, ContractName, SymbolicExpression};
 use vm::stx_transfer_consolidated;
@@ -42,15 +50,8 @@ use vm::types::{
 };
 use vm::{eval, is_reserved};
 
-use chainstate::burn::{BlockHeaderHash, VRFSeed};
-use chainstate::stacks::db::StacksChainState;
-use chainstate::stacks::events::*;
-use chainstate::stacks::Error as ChainstateError;
-use chainstate::stacks::StacksBlockId;
-use chainstate::stacks::StacksMicroblockHeader;
-
-use serde::Serialize;
-use vm::costs::cost_functions::ClarityCostFunction;
+use crate::util::errors::{ChainstateError, RuntimeErrorType};
+use crate::util::errors::{CostErrors, InterpreterFailureError};
 
 pub const MAX_CONTEXT_DEPTH: u16 = 256;
 
@@ -499,7 +500,7 @@ impl<'a> OwnedEnvironment<'a> {
         f: F,
     ) -> std::result::Result<(A, AssetMap, Vec<StacksTransactionEvent>), E>
     where
-        E: From<::vm::errors::Error>,
+        E: From<::util::errors::InterpreterError>,
         F: FnOnce(&mut Environment) -> std::result::Result<A, E>,
     {
         assert!(self.context.is_top_level());
@@ -635,8 +636,9 @@ impl<'a> OwnedEnvironment<'a> {
 
     pub fn commit(&mut self) -> Result<(AssetMap, EventBatch)> {
         let (asset_map, event_batch) = self.context.commit()?;
-        let asset_map = asset_map.ok_or(InterpreterError::FailedToConstructAssetTable)?;
-        let event_batch = event_batch.ok_or(InterpreterError::FailedToConstructEventBatch)?;
+        let asset_map = asset_map.ok_or(InterpreterFailureError::FailedToConstructAssetTable)?;
+        let event_batch =
+            event_batch.ok_or(InterpreterFailureError::FailedToConstructEventBatch)?;
 
         Ok((asset_map, event_batch))
     }
@@ -871,7 +873,7 @@ impl<'a, 'b> Environment<'a, 'b> {
             let args: Result<Vec<Value>> = args.iter()
                 .map(|arg| {
                     let value = arg.match_atom_value()
-                        .ok_or_else(|| InterpreterError::InterpreterError(format!("Passed non-value expression to exec_tx on {}!",
+                        .ok_or_else(|| InterpreterFailureError::InterpreterError(format!("Passed non-value expression to exec_tx on {}!",
                                                                                   tx_name)))?;
                     Ok(value.clone())
                 })
@@ -1056,7 +1058,7 @@ impl<'a, 'b> Environment<'a, 'b> {
                 }
                 Err(_) => {
                     self.global_context.roll_back();
-                    Err(InterpreterError::InsufficientBalance.into())
+                    Err(InterpreterFailureError::InsufficientBalance.into())
                 }
             },
             Err(e) => {
@@ -1575,7 +1577,7 @@ impl CallStack {
     pub fn remove(&mut self, function: &FunctionIdentifier, tracked: bool) -> Result<()> {
         if let Some(removed) = self.stack.pop() {
             if removed != *function {
-                return Err(InterpreterError::InterpreterError(
+                return Err(InterpreterFailureError::InterpreterError(
                     "Tried to remove item from empty call stack.".to_string(),
                 )
                 .into());
@@ -1585,7 +1587,7 @@ impl CallStack {
             }
             Ok(())
         } else {
-            return Err(InterpreterError::InterpreterError(
+            return Err(InterpreterFailureError::InterpreterError(
                 "Tried to remove item from empty call stack.".to_string(),
             )
             .into());

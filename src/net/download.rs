@@ -25,10 +25,10 @@ use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::TrySendError;
 
+use crate::util::errors::NetworkError as net_error;
 use net::asn::ASEntry4;
 use net::db::PeerDB;
 use net::inv::InvState;
-use net::Error as net_error;
 use net::Neighbor;
 use net::NeighborKey;
 use net::PeerAddress;
@@ -54,8 +54,8 @@ use net::db::*;
 
 use net::p2p::PeerNetwork;
 
+use crate::util::errors::DBError as db_error;
 use util::db::DBConn;
-use util::db::Error as db_error;
 use util::secp256k1::Secp256k1PrivateKey;
 use util::secp256k1::Secp256k1PublicKey;
 
@@ -65,8 +65,8 @@ use chainstate::burn::db::sortdb::{
 use chainstate::burn::BlockHeaderHash;
 use chainstate::burn::BlockSnapshot;
 
+use crate::util::errors::ChainstateError as chainstate_error;
 use chainstate::stacks::db::StacksChainState;
-use chainstate::stacks::Error as chainstate_error;
 use chainstate::stacks::StacksBlockHeader;
 use chainstate::stacks::StacksBlockId;
 

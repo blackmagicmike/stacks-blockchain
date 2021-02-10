@@ -23,8 +23,23 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
-use core::mempool::MemPoolDB;
+use rand::prelude::*;
+use rand::thread_rng;
+use rand::Rng;
 
+use burnchains::BurnchainView;
+use burnchains::{Burnchain, BurnchainHeaderHash};
+use chainstate::burn::db::sortdb::{
+    PoxId, SortitionDB, SortitionDBConn, SortitionHandleConn, SortitionId,
+};
+use chainstate::burn::ConsensusHash;
+use chainstate::coordinator::comm::CoordinatorChannels;
+use chainstate::stacks::db::{StacksChainState, StacksEpochReceipt, StacksHeaderInfo};
+use chainstate::stacks::events::StacksTransactionReceipt;
+use chainstate::stacks::StacksBlockHeader;
+use chainstate::stacks::StacksBlockId;
+use core::mempool::MemPoolDB;
+use core::mempool::*;
 use net::chat::*;
 use net::connection::*;
 use net::db::*;
@@ -32,33 +47,13 @@ use net::http::*;
 use net::p2p::*;
 use net::poll::*;
 use net::rpc::*;
-use net::Error as net_error;
 use net::*;
-
-use chainstate::burn::ConsensusHash;
-use chainstate::coordinator::comm::CoordinatorChannels;
-use chainstate::stacks::db::{StacksChainState, StacksEpochReceipt, StacksHeaderInfo};
-use chainstate::stacks::events::StacksTransactionReceipt;
-use chainstate::stacks::StacksBlockHeader;
-use chainstate::stacks::StacksBlockId;
-
-use core::mempool::*;
-
-use chainstate::burn::db::sortdb::{
-    PoxId, SortitionDB, SortitionDBConn, SortitionHandleConn, SortitionId,
-};
-
-use burnchains::Burnchain;
-use burnchains::BurnchainView;
-
 use util::get_epoch_time_secs;
 use util::hash::Sha512Trunc256Sum;
-
-use rand::prelude::*;
-use rand::thread_rng;
-use rand::Rng;
-
 use vm::costs::ExecutionCost;
+
+use crate::util::errors::{NetworkError as net_error, NetworkError};
+use util::errors::{ChainstateError, DBError};
 
 pub type BlocksAvailableMap = HashMap<BurnchainHeaderHash, (u64, ConsensusHash)>;
 
@@ -496,7 +491,7 @@ impl Relayer {
         consensus_hash: &ConsensusHash,
         block: &StacksBlock,
         download_time: u64,
-    ) -> Result<bool, chainstate_error> {
+    ) -> Result<bool, ChainstateError> {
         // find the snapshot of the parent of this block
         let db_handle = SortitionHandleConn::open_reader_consensus(sort_ic, consensus_hash)?;
         let parent_block_snapshot = match db_handle
@@ -520,7 +515,7 @@ impl Relayer {
                 );
                 return Ok(false);
             }
-            Err(db_error::InvalidPoxSortition) => {
+            Err(DBError::InvalidPoxSortition) => {
                 warn!(
                     "Received block {}/{} on a non-canonical PoX sortition",
                     consensus_hash,
@@ -642,7 +637,7 @@ impl Relayer {
                         new_blocks.insert((*consensus_hash).clone());
                     }
                 }
-                Err(chainstate_error::InvalidStacksBlock(msg)) => {
+                Err(ChainstateError::InvalidStacksBlock(msg)) => {
                     warn!("Downloaded invalid Stacks block: {}", msg);
                     // NOTE: we can't punish the neighbor for this, since we could have been
                     // MITM'ed in our download.
@@ -730,7 +725,7 @@ impl Relayer {
                                 new_blocks.insert(consensus_hash.clone());
                             }
                         }
-                        Err(chainstate_error::InvalidStacksBlock(msg)) => {
+                        Err(ChainstateError::InvalidStacksBlock(msg)) => {
                             warn!(
                                 "Invalid pushed Stacks block {}/{}: {}",
                                 &consensus_hash,
@@ -858,7 +853,7 @@ impl Relayer {
                                 }
                             }
                         }
-                        Err(chainstate_error::InvalidStacksMicroblock(msg, hash)) => {
+                        Err(ChainstateError::InvalidStacksMicroblock(msg, hash)) => {
                             warn!(
                                 "Invalid pushed microblock {}/{}-{}: {:?}",
                                 &consensus_hash, &anchored_block_hash, hash, msg
@@ -1126,7 +1121,7 @@ impl Relayer {
     pub fn setup_unconfirmed_state(
         chainstate: &mut StacksChainState,
         sortdb: &SortitionDB,
-    ) -> Result<(), Error> {
+    ) -> Result<(), NetworkError> {
         let (canonical_consensus_hash, canonical_block_hash) =
             SortitionDB::get_canonical_stacks_chain_tip_hash(sortdb.conn())?;
         let canonical_tip = StacksBlockHeader::make_index_block_hash(
@@ -1146,7 +1141,7 @@ impl Relayer {
     pub fn setup_unconfirmed_state_readonly(
         chainstate: &mut StacksChainState,
         sortdb: &SortitionDB,
-    ) -> Result<(), Error> {
+    ) -> Result<(), NetworkError> {
         let (canonical_consensus_hash, canonical_block_hash) =
             SortitionDB::get_canonical_stacks_chain_tip_hash(sortdb.conn())?;
         let canonical_tip = StacksBlockHeader::make_index_block_hash(
@@ -1582,9 +1577,13 @@ impl PeerNetwork {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
     use chainstate::stacks::db::blocks::MINIMUM_TX_FEE;
     use chainstate::stacks::db::blocks::MINIMUM_TX_FEE_RATE_PER_BYTE;
+    use chainstate::stacks::test::*;
+    use chainstate::stacks::*;
     use chainstate::stacks::*;
     use net::asn::*;
     use net::chat::*;
@@ -1595,19 +1594,13 @@ mod test {
     use net::inv::*;
     use net::test::*;
     use net::*;
-
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-
-    use chainstate::stacks::test::*;
-    use chainstate::stacks::*;
-
+    use util::sleep_ms;
+    use util::test::*;
     use vm::clarity::ClarityConnection;
     use vm::costs::LimitedCostTracker;
     use vm::database::ClarityDatabase;
 
-    use util::sleep_ms;
-    use util::test::*;
+    use super::*;
 
     #[test]
     fn test_relayer_stats_add_relyed_messages() {

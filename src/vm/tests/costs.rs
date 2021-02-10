@@ -14,11 +14,26 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use chainstate::burn::BlockHeaderHash;
+use chainstate::stacks::boot::boot_code_id;
+use chainstate::stacks::events::StacksTransactionEvent;
+use chainstate::stacks::index::storage::TrieFileStorage;
+use chainstate::stacks::index::MarfTrieId;
+use chainstate::stacks::StacksBlockHeader;
+use chainstate::stacks::StacksBlockId;
+use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
+use core::FIRST_STACKS_BLOCK_HASH;
 use util::hash::hex_bytes;
 use vm::clarity::ClarityInstance;
+use vm::contexts::Environment;
 use vm::contexts::{AssetMap, AssetMapEntry, GlobalContext, OwnedEnvironment};
 use vm::contracts::Contract;
-use vm::errors::{CheckErrors, Error, RuntimeErrorType};
+use vm::costs::cost_functions::ClarityCostFunction;
+use vm::costs::{ClarityCostFunctionReference, ExecutionCost, LimitedCostTracker};
+use vm::database::{
+    ClarityDatabase, MarfedKV, MemoryBackingStore, NULL_BURN_STATE_DB, NULL_HEADER_DB,
+};
+use vm::errors::CheckErrors;
 use vm::execute as vm_execute;
 use vm::functions::NativeFunctions;
 use vm::representations::SymbolicExpression;
@@ -28,22 +43,7 @@ use vm::tests::{
 };
 use vm::types::{AssetIdentifier, PrincipalData, QualifiedContractIdentifier, ResponseData, Value};
 
-use chainstate::burn::BlockHeaderHash;
-use chainstate::stacks::boot::boot_code_id;
-use chainstate::stacks::events::StacksTransactionEvent;
-use chainstate::stacks::index::storage::TrieFileStorage;
-use chainstate::stacks::index::MarfTrieId;
-use chainstate::stacks::StacksBlockId;
-use vm::contexts::Environment;
-use vm::costs::{ClarityCostFunctionReference, ExecutionCost, LimitedCostTracker};
-use vm::database::{
-    ClarityDatabase, MarfedKV, MemoryBackingStore, NULL_BURN_STATE_DB, NULL_HEADER_DB,
-};
-
-use chainstate::stacks::StacksBlockHeader;
-use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
-use core::FIRST_STACKS_BLOCK_HASH;
-use vm::costs::cost_functions::ClarityCostFunction;
+use crate::util::errors::{InterpreterError, RuntimeErrorType};
 
 lazy_static! {
     static ref COST_VOTING_TESTNET_CONTRACT: QualifiedContractIdentifier =
@@ -144,7 +144,7 @@ fn execute_transaction(
     contract_identifier: &QualifiedContractIdentifier,
     tx: &str,
     args: &[SymbolicExpression],
-) -> Result<(Value, AssetMap, Vec<StacksTransactionEvent>), Error> {
+) -> Result<(Value, AssetMap, Vec<StacksTransactionEvent>), InterpreterError> {
     env.execute_transaction(issuer, contract_identifier.clone(), tx, args)
 }
 

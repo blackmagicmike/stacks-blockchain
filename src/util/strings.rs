@@ -26,7 +26,7 @@ use std::ops::DerefMut;
 use regex::Regex;
 use url;
 
-use net::Error as net_error;
+use crate::util::errors::NetworkError as net_error;
 use net::MAX_MESSAGE_LEN;
 use util::retry::BoundReader;
 use vm::ast::parser::{lex, LexItem, CONTRACT_MAX_NAME_LENGTH, CONTRACT_MIN_NAME_LENGTH};

@@ -14,12 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod accounts;
-pub mod blocks;
-pub mod contracts;
-pub mod headers;
-pub mod transactions;
-pub mod unconfirmed;
+use std::collections::{btree_map::Entry, BTreeMap};
+use std::fmt;
+use std::fs;
+use std::io;
+use std::io::prelude::*;
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
 
 use rusqlite::types::ToSql;
 use rusqlite::Connection;
@@ -28,58 +29,36 @@ use rusqlite::Row;
 use rusqlite::Transaction;
 use rusqlite::NO_PARAMS;
 
-use std::collections::{btree_map::Entry, BTreeMap};
-use std::fmt;
-use std::fs;
-use std::io;
-use std::io::prelude::*;
-
-use std::ops::{Deref, DerefMut};
-
-use core::*;
-
+use crate::util::errors::ChainstateError;
 use burnchains::{Address, Burnchain, BurnchainParameters};
-
+use chainstate::burn::db::sortdb::BlockHeaderCache;
+use chainstate::burn::db::sortdb::*;
 use chainstate::burn::db::sortdb::{SortitionDB, SortitionDBConn};
 use chainstate::burn::ConsensusHash;
-
+use chainstate::stacks::boot::*;
 use chainstate::stacks::db::accounts::*;
 use chainstate::stacks::db::blocks::*;
+use chainstate::stacks::db::unconfirmed::UnconfirmedState;
 use chainstate::stacks::events::*;
 use chainstate::stacks::index::marf::{
     MarfConnection, BLOCK_HASH_TO_HEIGHT_MAPPING_KEY, BLOCK_HEIGHT_TO_HASH_MAPPING_KEY, MARF,
 };
-use chainstate::stacks::index::{MARFValue, MarfTrieId, TrieHash};
-use chainstate::stacks::Error;
-use chainstate::stacks::*;
-
 use chainstate::stacks::index::storage::TrieFileStorage;
-
-use chainstate::burn::db::sortdb::BlockHeaderCache;
-
-use std::path::{Path, PathBuf};
-
-use util::db::Error as db_error;
+use chainstate::stacks::index::{MARFValue, MarfTrieId, TrieHash};
+use chainstate::stacks::*;
+use core::CHAINSTATE_VERSION;
+use core::*;
+use net::atlas::BNS_CHARS_REGEX;
 use util::db::{
     db_mkdirs, query_count, query_row, tx_begin_immediate, tx_busy_handler, DBConn, DBTx,
     FromColumn, FromRow, IndexDBConn, IndexDBTx,
 };
-
 use util::hash::to_hex;
-
-use chainstate::burn::db::sortdb::*;
-
-use chainstate::stacks::boot::*;
-
-use net::atlas::BNS_CHARS_REGEX;
-use net::Error as net_error;
-
 use vm::analysis::analysis_db::AnalysisDatabase;
 use vm::analysis::run_analysis;
 use vm::ast::build_ast;
 use vm::clarity::{
     ClarityBlockConnection, ClarityConnection, ClarityInstance, ClarityReadOnlyConnection,
-    Error as clarity_error,
 };
 use vm::contexts::OwnedEnvironment;
 use vm::costs::{ExecutionCost, LimitedCostTracker};
@@ -91,11 +70,16 @@ use vm::representations::ClarityName;
 use vm::representations::ContractName;
 use vm::types::TupleData;
 
-use core::CHAINSTATE_VERSION;
-
-use chainstate::stacks::db::unconfirmed::UnconfirmedState;
-
 use crate::burnchains::bitcoin::address::BitcoinAddress;
+use crate::util::errors::NetworkError as net_error;
+use crate::util::errors::{ClarityError as clarity_error, DBError as db_error};
+
+pub mod accounts;
+pub mod blocks;
+pub mod contracts;
+pub mod headers;
+pub mod transactions;
+pub mod unconfirmed;
 
 pub struct StacksChainState {
     pub mainnet: bool,
@@ -702,7 +686,7 @@ impl StacksChainState {
         mainnet: bool,
         chain_id: u32,
         marf_path: &str,
-    ) -> Result<MARF<StacksBlockId>, Error> {
+    ) -> Result<MARF<StacksBlockId>, ChainstateError> {
         let mut marf = StacksChainState::open_index(marf_path)?;
         let mut dbtx = StacksDBTx::new(&mut marf, ());
 
@@ -732,7 +716,7 @@ impl StacksChainState {
         mainnet: bool,
         chain_id: u32,
         index_path: &str,
-    ) -> Result<MARF<StacksBlockId>, Error> {
+    ) -> Result<MARF<StacksBlockId>, ChainstateError> {
         let create_flag = fs::metadata(index_path).is_err();
 
         if create_flag {
@@ -753,7 +737,7 @@ impl StacksChainState {
                     "Invalid chain state database: expected mainnet = {}, got {}",
                     mainnet, db_config.mainnet
                 );
-                return Err(Error::InvalidChainstateDB);
+                return Err(ChainstateError::InvalidChainstateDB);
             }
 
             if db_config.version != CHAINSTATE_VERSION {
@@ -761,7 +745,7 @@ impl StacksChainState {
                     "Invalid chain state database: expected version = {}, got {}",
                     CHAINSTATE_VERSION, db_config.version
                 );
-                return Err(Error::InvalidChainstateDB);
+                return Err(ChainstateError::InvalidChainstateDB);
             }
 
             if db_config.chain_id != chain_id {
@@ -769,40 +753,41 @@ impl StacksChainState {
                     "Invalid chain ID: expected {}, got {}",
                     chain_id, db_config.chain_id
                 );
-                return Err(Error::InvalidChainstateDB);
+                return Err(ChainstateError::InvalidChainstateDB);
             }
 
             Ok(marf)
         }
     }
 
-    pub fn open_index(marf_path: &str) -> Result<MARF<StacksBlockId>, Error> {
+    pub fn open_index(marf_path: &str) -> Result<MARF<StacksBlockId>, ChainstateError> {
         test_debug!("Open MARF index at {}", marf_path);
-        let marf =
-            MARF::from_path(marf_path).map_err(|e| Error::DBError(db_error::IndexError(e)))?;
+        let marf = MARF::from_path(marf_path)
+            .map_err(|e| ChainstateError::DBError(db_error::IndexError(e)))?;
         Ok(marf)
     }
 
     /// Idempotent `mkdir -p`
-    fn mkdirs(path: &PathBuf) -> Result<String, Error> {
+    fn mkdirs(path: &PathBuf) -> Result<String, ChainstateError> {
         match fs::metadata(path) {
             Ok(md) => {
                 if !md.is_dir() {
                     error!("Not a directory: {:?}", path);
-                    return Err(Error::DBError(db_error::ExistsError));
+                    return Err(ChainstateError::DBError(db_error::ExistsError));
                 }
             }
             Err(e) => {
                 if e.kind() != io::ErrorKind::NotFound {
-                    return Err(Error::DBError(db_error::IOError(e)));
+                    return Err(ChainstateError::DBError(db_error::IOError(e)));
                 }
-                fs::create_dir_all(path).map_err(|e| Error::DBError(db_error::IOError(e)))?;
+                fs::create_dir_all(path)
+                    .map_err(|e| ChainstateError::DBError(db_error::IOError(e)))?;
             }
         }
 
         let path_str = path
             .to_str()
-            .ok_or_else(|| Error::DBError(db_error::ParseError))?
+            .ok_or_else(|| ChainstateError::DBError(db_error::ParseError))?
             .to_string();
         Ok(path_str)
     }
@@ -841,7 +826,7 @@ impl StacksChainState {
         chainstate: &mut StacksChainState,
         mainnet: bool,
         boot_data: &mut ChainStateBootData,
-    ) -> Result<Vec<StacksTransactionReceipt>, Error> {
+    ) -> Result<Vec<StacksTransactionReceipt>, ChainstateError> {
         info!("Building genesis block");
 
         let tx_version = if mainnet {
@@ -1265,7 +1250,7 @@ impl StacksChainState {
         mainnet: bool,
         chain_id: u32,
         path_str: &str,
-    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), ChainstateError> {
         StacksChainState::open_and_exec(
             mainnet,
             chain_id,
@@ -1277,7 +1262,9 @@ impl StacksChainState {
 
     /// Re-open the chainstate -- i.e. to get a new handle to it using an existing chain state's
     /// parameters
-    pub fn reopen(&self) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), Error> {
+    pub fn reopen(
+        &self,
+    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), ChainstateError> {
         StacksChainState::open(self.mainnet, self.chain_id, &self.root_path)
     }
 
@@ -1286,7 +1273,7 @@ impl StacksChainState {
     pub fn reopen_limited(
         &self,
         budget: ExecutionCost,
-    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), ChainstateError> {
         StacksChainState::open_and_exec(self.mainnet, self.chain_id, &self.root_path, None, budget)
     }
 
@@ -1295,7 +1282,7 @@ impl StacksChainState {
         path_str: &str,
         boot_data: Option<&mut ChainStateBootData>,
         block_limit: ExecutionCost,
-    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), ChainstateError> {
         StacksChainState::open_and_exec(false, chain_id, path_str, boot_data, block_limit)
     }
 
@@ -1304,7 +1291,7 @@ impl StacksChainState {
         chain_id: u32,
         path_str: &str,
         block_limit: ExecutionCost,
-    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), ChainstateError> {
         StacksChainState::open_and_exec(mainnet, chain_id, path_str, None, block_limit)
     }
 
@@ -1314,7 +1301,7 @@ impl StacksChainState {
         path_str: &str,
         boot_data: Option<&mut ChainStateBootData>,
         block_limit: ExecutionCost,
-    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(StacksChainState, Vec<StacksTransactionReceipt>), ChainstateError> {
         let mut path = PathBuf::from(path_str);
 
         let chain_id_str = if mainnet {
@@ -1333,7 +1320,7 @@ impl StacksChainState {
 
         let blocks_path_root = blocks_path
             .to_str()
-            .ok_or_else(|| Error::DBError(db_error::ParseError))?
+            .ok_or_else(|| ChainstateError::DBError(db_error::ParseError))?
             .to_string();
 
         let mut state_path = path;
@@ -1344,13 +1331,13 @@ impl StacksChainState {
         state_path.push("clarity");
         let clarity_state_index_root = state_path
             .to_str()
-            .ok_or_else(|| Error::DBError(db_error::ParseError))?
+            .ok_or_else(|| ChainstateError::DBError(db_error::ParseError))?
             .to_string();
 
         state_path.push("marf");
         let clarity_state_index_marf = state_path
             .to_str()
-            .ok_or_else(|| Error::DBError(db_error::ParseError))?
+            .ok_or_else(|| ChainstateError::DBError(db_error::ParseError))?
             .to_string();
 
         state_path.pop();
@@ -1359,7 +1346,7 @@ impl StacksChainState {
         state_path.push("index");
         let header_index_root = state_path
             .to_str()
-            .ok_or_else(|| Error::DBError(db_error::ParseError))?
+            .ok_or_else(|| ChainstateError::DBError(db_error::ParseError))?
             .to_string();
 
         let init_required = match fs::metadata(&clarity_state_index_marf) {
@@ -1376,7 +1363,7 @@ impl StacksChainState {
                 &MINER_BLOCK_HEADER_HASH,
             )),
         )
-        .map_err(|e| Error::ClarityError(e.into()))?;
+        .map_err(|e| ChainstateError::ClarityError(e.into()))?;
 
         let clarity_state = ClarityInstance::new(mainnet, vm_state, block_limit.clone());
 
@@ -1421,25 +1408,27 @@ impl StacksChainState {
 
     /// Begin a transaction against the (indexed) stacks chainstate DB.
     /// Does not create a Clarity instance.
-    pub fn index_tx_begin<'a>(&'a mut self) -> Result<StacksDBTx<'a>, Error> {
+    pub fn index_tx_begin<'a>(&'a mut self) -> Result<StacksDBTx<'a>, ChainstateError> {
         Ok(StacksDBTx::new(&mut self.state_index, ()))
     }
 
-    pub fn index_conn<'a>(&'a self) -> Result<StacksDBConn<'a>, Error> {
+    pub fn index_conn<'a>(&'a self) -> Result<StacksDBConn<'a>, ChainstateError> {
         Ok(StacksDBConn::new(&self.state_index, ()))
     }
 
     /// Begin a transaction against the underlying DB
     /// Does not create a Clarity instance, and does not affect the MARF.
-    pub fn db_tx_begin<'a>(&'a mut self) -> Result<DBTx<'a>, Error> {
-        self.state_index.storage_tx().map_err(Error::DBError)
+    pub fn db_tx_begin<'a>(&'a mut self) -> Result<DBTx<'a>, ChainstateError> {
+        self.state_index
+            .storage_tx()
+            .map_err(ChainstateError::DBError)
     }
 
     /// Simultaneously begin a transaction against both the headers and blocks.
     /// Used when considering a new block to append the chain state.
     pub fn chainstate_tx_begin<'a>(
         &'a mut self,
-    ) -> Result<(ChainstateTx<'a>, &'a mut ClarityInstance), Error> {
+    ) -> Result<(ChainstateTx<'a>, &'a mut ClarityInstance), ChainstateError> {
         let config = self.config();
         let blocks_path = self.blocks_path.clone();
         let clarity_instance = &mut self.clarity_state;
@@ -1475,7 +1464,7 @@ impl StacksChainState {
         parent_id_bhh: &StacksBlockId,
         contract: &QualifiedContractIdentifier,
         code: &str,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value, ChainstateError> {
         self.clarity_state
             .eval_read_only(
                 parent_id_bhh,
@@ -1484,7 +1473,7 @@ impl StacksChainState {
                 contract,
                 code,
             )
-            .map_err(Error::ClarityError)
+            .map_err(ChainstateError::ClarityError)
     }
 
     pub fn db(&self) -> &DBConn {
@@ -1643,7 +1632,7 @@ impl StacksChainState {
         &mut self,
         burn_dbconn: &dyn BurnStateDB,
         to_do: F,
-    ) -> Result<Option<R>, Error>
+    ) -> Result<Option<R>, ChainstateError>
     where
         F: FnOnce(&mut ClarityReadOnlyConnection) -> R,
     {
@@ -1679,7 +1668,7 @@ impl StacksChainState {
         burn_dbconn: &dyn BurnStateDB,
         parent_tip: &StacksBlockId,
         to_do: F,
-    ) -> Result<Option<R>, Error>
+    ) -> Result<Option<R>, ChainstateError>
     where
         F: FnOnce(&mut ClarityReadOnlyConnection) -> R,
     {
@@ -1827,7 +1816,7 @@ impl StacksChainState {
         clarity_tx: &mut ClarityTx,
         height: u32,
         mblock_pubkey_hash: &Hash160,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         clarity_tx
             .connection()
             .as_transaction(|tx| {
@@ -1845,7 +1834,7 @@ impl StacksChainState {
     pub fn has_microblock_pubkey_hash(
         clarity_tx: &mut ClarityTx,
         mblock_pubkey_hash: &Hash160,
-    ) -> Result<Option<u32>, Error> {
+    ) -> Result<Option<u32>, ChainstateError> {
         let height_opt = clarity_tx
             .connection()
             .with_clarity_db_readonly::<_, Result<_, ()>>(|ref mut db| {
@@ -1872,7 +1861,7 @@ impl StacksChainState {
         user_burns: &Vec<StagingUserBurnSupport>,
         anchor_block_cost: &ExecutionCost,
         anchor_block_size: u64,
-    ) -> Result<StacksHeaderInfo, Error> {
+    ) -> Result<StacksHeaderInfo, ChainstateError> {
         if new_tip.parent_block != FIRST_STACKS_BLOCK_HASH {
             // not the first-ever block, so linkage must occur
             assert_eq!(new_tip.parent_block, parent_tip.block_hash());
@@ -1935,14 +1924,14 @@ impl StacksChainState {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
+    use std::fs;
 
     use chainstate::stacks::db::*;
     use chainstate::stacks::*;
-    use std::fs;
-
     use stx_genesis::GenesisData;
     use vm::database::NULL_BURN_STATE_DB;
+
+    use super::*;
 
     pub fn instantiate_chainstate(
         mainnet: bool,

@@ -22,14 +22,10 @@ use std::{error, fmt, str};
 
 use serde_json::Value as JSONValue;
 
-use net::Error as NetError;
 use util::hash::{hex_bytes, to_hex};
 use util::retry::BoundReader;
 use vm::database::{ClarityDeserializable, ClaritySerializable};
-use vm::errors::{
-    CheckErrors, Error as ClarityError, IncomparableError, InterpreterError, InterpreterResult,
-    RuntimeErrorType,
-};
+use vm::errors::{CheckErrors, InterpreterResult};
 use vm::representations::{ClarityName, ContractName, MAX_STRING_LEN};
 use vm::types::{
     BufferLength, CharType, OptionalData, PrincipalData, QualifiedContractIdentifier, ResponseData,
@@ -37,6 +33,10 @@ use vm::types::{
     TupleData, TypeSignature, Value, BOUND_VALUE_SERIALIZATION_BYTES, MAX_VALUE_SIZE,
 };
 
+use crate::util::errors::{
+    IncomparableError, InterpreterError as ClarityError, InterpreterFailureError,
+    NetworkError as NetError, RuntimeErrorType,
+};
 use crate::util::messages::StacksMessageCodec;
 
 /// Errors that may occur in serialization or deserialization
@@ -671,8 +671,9 @@ mod tests {
     use std::io::Write;
 
     use vm::database::ClaritySerializable;
-    use vm::errors::Error;
     use vm::types::TypeSignature::{BoolType, IntType};
+
+    use crate::util::errors::InterpreterError;
 
     use super::super::*;
     use super::SerializationError;

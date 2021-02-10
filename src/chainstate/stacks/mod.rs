@@ -27,6 +27,8 @@ use std::ops::DerefMut;
 use rusqlite::Error as RusqliteError;
 use sha2::{Digest, Sha512Trunc256};
 
+use crate::util::errors::CostErrors;
+use crate::util::errors::MarfError;
 use address::AddressHashMode;
 use burnchains::BurnchainHeaderHash;
 use burnchains::Txid;
@@ -35,12 +37,9 @@ use chainstate::burn::{BlockHeaderHash, ConsensusHash};
 use chainstate::stacks::db::accounts::MinerReward;
 use chainstate::stacks::db::blocks::MemPoolRejection;
 use chainstate::stacks::db::StacksHeaderInfo;
-use chainstate::stacks::index::Error as marf_error;
 use chainstate::stacks::index::{TrieHash, TRIEHASH_ENCODED_SIZE};
-use net::Error as net_error;
 use net::MAX_MESSAGE_LEN;
 use util::db::DBConn;
-use util::db::Error as db_error;
 use util::hash::Hash160;
 use util::hash::Sha512Trunc256Sum;
 use util::hash::HASH160_ENCODED_SIZE;
@@ -48,14 +47,15 @@ use util::secp256k1;
 use util::secp256k1::MessageSignature;
 use util::strings::StacksString;
 use util::vrf::VRFProof;
-use vm::clarity::Error as clarity_error;
 use vm::contexts::GlobalContext;
-use vm::costs::CostErrors;
 use vm::costs::ExecutionCost;
-use vm::errors::Error as clarity_interpreter_error;
 use vm::representations::{ClarityName, ContractName};
 use vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, Value};
 
+use crate::util::errors::ClarityError;
+use crate::util::errors::DBError;
+use crate::util::errors::InterpreterError;
+use crate::util::errors::NetworkError;
 use crate::util::messages::{read_next, write_next, StacksMessageCodec};
 
 pub mod address;
@@ -139,198 +139,6 @@ impl AddressHashMode {
                 AddressHashMode::SerializeP2PKH
             }
             _ => AddressHashMode::SerializeP2SH,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    InvalidFee,
-    InvalidStacksBlock(String),
-    InvalidStacksMicroblock(String, BlockHeaderHash),
-    InvalidStacksTransaction(String, bool),
-    PostConditionFailed(String),
-    NoSuchBlockError,
-    InvalidChainstateDB,
-    BlockTooBigError,
-    BlockCostExceeded,
-    NoTransactionsToMine,
-    MicroblockStreamTooLongError,
-    IncompatibleSpendingConditionError,
-    CostOverflowError(ExecutionCost, ExecutionCost, ExecutionCost),
-    ClarityError(clarity_error),
-    DBError(db_error),
-    NetError(net_error),
-    MARFError(marf_error),
-    ReadError(io::Error),
-    WriteError(io::Error),
-    MemPoolError(String),
-    PoxAlreadyLocked,
-    PoxInsufficientBalance,
-    PoxNoRewardCycle,
-}
-
-impl From<marf_error> for Error {
-    fn from(e: marf_error) -> Error {
-        Error::MARFError(e)
-    }
-}
-
-impl From<clarity_error> for Error {
-    fn from(e: clarity_error) -> Error {
-        Error::ClarityError(e)
-    }
-}
-
-impl From<net_error> for Error {
-    fn from(e: net_error) -> Error {
-        Error::NetError(e)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::InvalidFee => write!(f, "Invalid fee"),
-            Error::InvalidStacksBlock(ref s) => fmt::Display::fmt(s, f),
-            Error::InvalidStacksMicroblock(ref s, _) => fmt::Display::fmt(s, f),
-            Error::InvalidStacksTransaction(ref s, _) => fmt::Display::fmt(s, f),
-            Error::PostConditionFailed(ref s) => fmt::Display::fmt(s, f),
-            Error::NoSuchBlockError => write!(f, "No such Stacks block"),
-            Error::InvalidChainstateDB => write!(f, "Invalid chainstate database"),
-            Error::BlockTooBigError => write!(f, "Too much data in block"),
-            Error::BlockCostExceeded => write!(f, "Block execution budget exceeded"),
-            Error::MicroblockStreamTooLongError => write!(f, "Too many microblocks in stream"),
-            Error::IncompatibleSpendingConditionError => {
-                write!(f, "Spending condition is incompatible with this operation")
-            }
-            Error::CostOverflowError(ref c1, ref c2, ref c3) => write!(
-                f,
-                "{}",
-                &format!(
-                    "Cost overflow: before={:?}, after={:?}, budget={:?}",
-                    c1, c2, c3
-                )
-            ),
-            Error::ClarityError(ref e) => fmt::Display::fmt(e, f),
-            Error::DBError(ref e) => fmt::Display::fmt(e, f),
-            Error::NetError(ref e) => fmt::Display::fmt(e, f),
-            Error::MARFError(ref e) => fmt::Display::fmt(e, f),
-            Error::ReadError(ref e) => fmt::Display::fmt(e, f),
-            Error::WriteError(ref e) => fmt::Display::fmt(e, f),
-            Error::MemPoolError(ref s) => fmt::Display::fmt(s, f),
-            Error::NoTransactionsToMine => write!(f, "No transactions to mine"),
-            Error::PoxAlreadyLocked => write!(f, "Account has already locked STX for PoX"),
-            Error::PoxInsufficientBalance => write!(f, "Not enough STX to lock"),
-            Error::PoxNoRewardCycle => write!(f, "No such reward cycle"),
-        }
-    }
-}
-
-impl error::Error for Error {
-    fn cause(&self) -> Option<&dyn error::Error> {
-        match *self {
-            Error::InvalidFee => None,
-            Error::InvalidStacksBlock(ref _s) => None,
-            Error::InvalidStacksMicroblock(ref _s, ref _h) => None,
-            Error::InvalidStacksTransaction(ref _s, _q) => None,
-            Error::PostConditionFailed(ref _s) => None,
-            Error::NoSuchBlockError => None,
-            Error::InvalidChainstateDB => None,
-            Error::BlockTooBigError => None,
-            Error::BlockCostExceeded => None,
-            Error::MicroblockStreamTooLongError => None,
-            Error::IncompatibleSpendingConditionError => None,
-            Error::CostOverflowError(..) => None,
-            Error::ClarityError(ref e) => Some(e),
-            Error::DBError(ref e) => Some(e),
-            Error::NetError(ref e) => Some(e),
-            Error::MARFError(ref e) => Some(e),
-            Error::ReadError(ref e) => Some(e),
-            Error::WriteError(ref e) => Some(e),
-            Error::MemPoolError(ref _s) => None,
-            Error::NoTransactionsToMine => None,
-            Error::PoxAlreadyLocked => None,
-            Error::PoxInsufficientBalance => None,
-            Error::PoxNoRewardCycle => None,
-        }
-    }
-}
-
-impl Error {
-    fn name(&self) -> &'static str {
-        match self {
-            Error::InvalidFee => "InvalidFee",
-            Error::InvalidStacksBlock(ref _s) => "InvalidStacksBlock",
-            Error::InvalidStacksMicroblock(ref _s, ref _h) => "InvalidStacksMicroblock",
-            Error::InvalidStacksTransaction(ref _s, _q) => "InvalidStacksTransaction",
-            Error::PostConditionFailed(ref _s) => "PostConditionFailed",
-            Error::NoSuchBlockError => "NoSuchBlockError",
-            Error::InvalidChainstateDB => "InvalidChainstateDB",
-            Error::BlockTooBigError => "BlockTooBigError",
-            Error::BlockCostExceeded => "BlockCostExceeded",
-            Error::MicroblockStreamTooLongError => "MicroblockStreamTooLongError",
-            Error::IncompatibleSpendingConditionError => "IncompatibleSpendingConditionError",
-            Error::CostOverflowError(..) => "CostOverflowError",
-            Error::ClarityError(ref _e) => "ClarityError",
-            Error::DBError(ref _e) => "DBError",
-            Error::NetError(ref _e) => "NetError",
-            Error::MARFError(ref _e) => "MARFError",
-            Error::ReadError(ref _e) => "ReadError",
-            Error::WriteError(ref _e) => "WriteError",
-            Error::MemPoolError(ref _s) => "MemPoolError",
-            Error::NoTransactionsToMine => "NoTransactionsToMine",
-            Error::PoxAlreadyLocked => "PoxAlreadyLocked",
-            Error::PoxInsufficientBalance => "PoxInsufficientBalance",
-            Error::PoxNoRewardCycle => "PoxNoRewardCycle",
-        }
-    }
-
-    pub fn into_json(&self) -> serde_json::Value {
-        let reason_code = self.name();
-        let reason_data = format!("{:?}", &self);
-        let result = json!({
-            "error": "chainstate error",
-            "reason": reason_code,
-            "reason_data": reason_data
-        });
-        result
-    }
-}
-
-impl From<RusqliteError> for Error {
-    fn from(e: RusqliteError) -> Error {
-        Error::DBError(db_error::SqliteError(e))
-    }
-}
-
-impl From<db_error> for Error {
-    fn from(e: db_error) -> Error {
-        Error::DBError(e)
-    }
-}
-
-impl From<clarity_interpreter_error> for Error {
-    fn from(e: clarity_interpreter_error) -> Error {
-        Error::ClarityError(clarity_error::Interpreter(e))
-    }
-}
-
-impl Error {
-    pub fn from_cost_error(
-        err: CostErrors,
-        cost_before: ExecutionCost,
-        context: &GlobalContext,
-    ) -> Error {
-        match err {
-            CostErrors::CostBalanceExceeded(used, budget) => {
-                Error::CostOverflowError(cost_before, used, budget)
-            }
-            _ => {
-                let cur_cost = context.cost_track.get_total();
-                let budget = context.cost_track.get_limit();
-                Error::CostOverflowError(cost_before, cur_cost, budget)
-            }
         }
     }
 }
@@ -451,12 +259,12 @@ impl TransactionAuthField {
     }
 
     // TODO: enforce u8; 32
-    pub fn get_public_key(&self, sighash_bytes: &[u8]) -> Result<StacksPublicKey, net_error> {
+    pub fn get_public_key(&self, sighash_bytes: &[u8]) -> Result<StacksPublicKey, NetworkError> {
         match *self {
             TransactionAuthField::PublicKey(ref pubk) => Ok(pubk.clone()),
             TransactionAuthField::Signature(ref key_fmt, ref sig) => {
                 let mut pubk = StacksPublicKey::recover_to_pubkey(sighash_bytes, sig)
-                    .map_err(|e| net_error::VerifyingError(e.to_string()))?;
+                    .map_err(|e| NetworkError::VerifyingError(e.to_string()))?;
                 pubk.set_compressed(if *key_fmt == TransactionPublicKeyEncoding::Compressed {
                     true
                 } else {

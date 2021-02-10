@@ -14,6 +14,29 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use address::AddressHashMode;
+use chainstate::stacks::{StacksAddress, C32_ADDRESS_VERSION_TESTNET_SINGLESIG};
+use util::hash;
+use vm::callables::{CallableType, NativeHandle};
+use vm::costs::cost_functions::ClarityCostFunction;
+use vm::costs::{
+    constants as cost_constants, cost_functions, runtime_cost, CostTracker, MemoryConsumer,
+};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
+pub use vm::functions::assets::stx_transfer_consolidated;
+pub use vm::functions::special::handle_contract_call_special_cases;
+use vm::is_reserved;
+use vm::representations::SymbolicExpressionType::{Atom, List};
+use vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
+use vm::types::{
+    BuffData, CharType, PrincipalData, ResponseData, SequenceData, TypeSignature, Value, BUFF_32,
+    BUFF_33, BUFF_65,
+};
+use vm::{eval, Environment, LocalContext};
+
+use crate::util::errors::{InterpreterError, RuntimeErrorType, ShortReturnType};
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least};
+
 mod arithmetic;
 mod assets;
 mod boolean;
@@ -24,30 +47,6 @@ mod options;
 mod sequences;
 mod special;
 pub mod tuples;
-
-use util::hash;
-use vm::callables::{CallableType, NativeHandle};
-use vm::costs::{
-    constants as cost_constants, cost_functions, runtime_cost, CostTracker, MemoryConsumer,
-};
-use vm::errors::{
-    check_argument_count, check_arguments_at_least, CheckErrors, Error,
-    InterpreterResult as Result, RuntimeErrorType, ShortReturnType,
-};
-use vm::is_reserved;
-use vm::representations::SymbolicExpressionType::{Atom, List};
-use vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
-use vm::types::{
-    BuffData, CharType, PrincipalData, ResponseData, SequenceData, TypeSignature, Value, BUFF_32,
-    BUFF_33, BUFF_65,
-};
-use vm::{eval, Environment, LocalContext};
-
-use address::AddressHashMode;
-use chainstate::stacks::{StacksAddress, C32_ADDRESS_VERSION_TESTNET_SINGLESIG};
-use vm::costs::cost_functions::ClarityCostFunction;
-pub use vm::functions::assets::stx_transfer_consolidated;
-pub use vm::functions::special::handle_contract_call_special_cases;
 
 define_named_enum!(NativeFunctions {
     Add("+"),
@@ -555,7 +554,7 @@ fn special_let(
     let mut memory_use = 0;
 
     finally_drop_memory!( env, memory_use; {
-        handle_binding_list::<_, Error>(bindings, |binding_name, var_sexp| {
+        handle_binding_list::<_, InterpreterError>(bindings, |binding_name, var_sexp| {
             if is_reserved(binding_name) ||
                 env.contract_context.lookup_function(binding_name).is_some() ||
                 inner_context.lookup_variable(binding_name).is_some() {

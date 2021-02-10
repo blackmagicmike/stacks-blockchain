@@ -16,7 +16,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
-use vm::ast::errors::{ParseError, ParseErrors, ParseResult};
+
+use crate::vm::ast::ParseResult;
 use vm::ast::types::{BuildASTPass, ContractAST, PreExpressionsDrain};
 use vm::functions::define::{DefineFunctions, DefineFunctionsParsed};
 use vm::functions::NativeFunctions;
@@ -27,6 +28,8 @@ use vm::representations::{
 use vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier, Value,
 };
+
+use crate::util::errors::{ParseError, ParseErrors};
 
 pub struct SugarExpander {
     issuer: StandardPrincipalData,
@@ -125,12 +128,13 @@ impl SugarExpander {
 
 #[cfg(test)]
 mod test {
-    use vm::ast::errors::{ParseError, ParseErrors};
     use vm::ast::sugar_expander::SugarExpander;
     use vm::ast::types::ContractAST;
     use vm::representations::{ContractName, PreSymbolicExpression, SymbolicExpression};
     use vm::types::{PrincipalData, QualifiedContractIdentifier};
     use vm::{ast, Value};
+
+    use crate::util::errors::{ParseError, ParseErrors};
 
     fn make_pre_atom(
         x: &str,

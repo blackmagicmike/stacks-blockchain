@@ -35,8 +35,8 @@ use chainstate::burn::BlockHeaderHash;
 use chainstate::burn::ConsensusHash;
 use chainstate::stacks::TransactionPayload;
 use chainstate::stacks::{
-    db::blocks::MemPoolRejection, db::StacksChainState, index::Error as MarfError,
-    Error as ChainstateError, StacksAddress, StacksBlockHeader, StacksTransaction,
+    db::blocks::MemPoolRejection, db::StacksChainState, StacksAddress, StacksBlockHeader,
+    StacksTransaction,
 };
 use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
 use core::FIRST_STACKS_BLOCK_HASH;
@@ -45,12 +45,12 @@ use util::db::query_rows;
 use util::db::tx_begin_immediate;
 use util::db::tx_busy_handler;
 use util::db::u64_to_sql;
-use util::db::Error as db_error;
 use util::db::FromColumn;
 use util::db::{sql_pragma, DBConn, DBTx, FromRow};
 use util::get_epoch_time_secs;
 use vm::types::PrincipalData;
 
+use crate::util::errors::{ChainstateError, DBError as db_error, MarfError};
 use crate::util::messages::StacksMessageCodec;
 
 // maximum number of confirmations a transaction can have before it's garbage-collected
@@ -1093,27 +1093,28 @@ mod tests {
     use chainstate::stacks::test::codec_all_transactions;
     use chainstate::stacks::{
         db::blocks::MemPoolRejection, db::StacksChainState, index::MarfTrieId, CoinbasePayload,
-        Error as ChainstateError, StacksAddress, StacksBlockHeader, StacksMicroblockHeader,
-        StacksPrivateKey, StacksPublicKey, StacksTransaction, StacksTransactionSigner,
-        TokenTransferMemo, TransactionAnchorMode, TransactionAuth, TransactionContractCall,
-        TransactionPayload, TransactionPostConditionMode, TransactionSmartContract,
-        TransactionSpendingCondition, TransactionVersion, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
+        StacksAddress, StacksBlockHeader, StacksMicroblockHeader, StacksPrivateKey,
+        StacksPublicKey, StacksTransaction, StacksTransactionSigner, TokenTransferMemo,
+        TransactionAnchorMode, TransactionAuth, TransactionContractCall, TransactionPayload,
+        TransactionPostConditionMode, TransactionSmartContract, TransactionSpendingCondition,
+        TransactionVersion, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
         C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
     };
     use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
     use core::FIRST_STACKS_BLOCK_HASH;
-    use net::Error as NetError;
     use util::db::{DBConn, FromRow};
     use util::{hash::hex_bytes, hash::to_hex, hash::*, log, secp256k1::*, strings::StacksString};
     use vm::{
         database::HeadersDB,
         database::NULL_BURN_STATE_DB,
-        errors::Error as ClarityError,
-        errors::RuntimeErrorType,
         types::{PrincipalData, QualifiedContractIdentifier},
         ClarityName, ContractName, Value,
     };
 
+    use crate::util::errors::{
+        ChainstateError, InterpreterError as ClarityError, NetworkError as NetError,
+        RuntimeErrorType,
+    };
     use crate::util::messages::StacksMessageCodec;
     use crate::{
         burnchains::BurnchainHeaderHash,

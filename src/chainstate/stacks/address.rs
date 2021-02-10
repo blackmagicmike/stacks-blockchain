@@ -19,6 +19,7 @@ use std::io::prelude::*;
 use std::io::{Read, Write};
 use std::{fmt, io};
 
+use crate::util::errors::NetworkError as net_error;
 use address::b58;
 use address::c32::c32_address;
 use address::c32::c32_address_decode;
@@ -39,7 +40,6 @@ use chainstate::stacks::{
 use deps::bitcoin::blockdata::opcodes::All as BtcOp;
 use deps::bitcoin::blockdata::script::Builder as BtcScriptBuilder;
 use deps::bitcoin::blockdata::transaction::TxOut;
-use net::Error as net_error;
 use util::hash::Hash160;
 use util::hash::HASH160_ENCODED_SIZE;
 use vm::types::{PrincipalData, StandardPrincipalData};

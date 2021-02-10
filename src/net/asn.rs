@@ -18,7 +18,7 @@ use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 
-use net::Error as net_error;
+use crate::util::errors::NetworkError as net_error;
 use net::PeerAddress;
 
 use regex::Captures;

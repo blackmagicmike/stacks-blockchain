@@ -14,12 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::util::errors::RuntimeErrorType;
 use regex::Regex;
 use std::borrow::Borrow;
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
-use vm::errors::RuntimeErrorType;
 use vm::types::{QualifiedContractIdentifier, TraitIdentifier, Value};
 
 pub const MAX_STRING_LEN: u8 = 128;

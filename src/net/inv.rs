@@ -17,9 +17,9 @@
  along with Blockstack. If not, see <http://www.gnu.org/licenses/>.
 */
 
+use crate::util::errors::NetworkError as net_error;
 use net::asn::ASEntry4;
 use net::db::PeerDB;
-use net::Error as net_error;
 use net::Neighbor;
 use net::NeighborKey;
 use net::PeerAddress;
@@ -41,8 +41,8 @@ use net::db::*;
 
 use net::p2p::PeerNetwork;
 
+use crate::util::errors::DBError as db_error;
 use util::db::DBConn;
-use util::db::Error as db_error;
 use util::get_epoch_time_ms;
 use util::get_epoch_time_secs;
 use util::secp256k1::Secp256k1PrivateKey;

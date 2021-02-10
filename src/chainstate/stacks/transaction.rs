@@ -22,7 +22,6 @@ use std::io::{Read, Write};
 use burnchains::Txid;
 use chainstate::stacks::*;
 use core::*;
-use net::Error as net_error;
 use util::hash::to_hex;
 use util::hash::Sha512Trunc256Sum;
 use util::retry::BoundReader;
@@ -33,6 +32,7 @@ use vm::types::serialization::SerializationError as clarity_serialization_error;
 use vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use vm::{SymbolicExpression, SymbolicExpressionType, Value};
 
+use crate::util::errors::{ChainstateError, NetworkError as net_error};
 use crate::util::messages::{read_next, write_next, StacksMessageCodec};
 use crate::util::secp256k1::StacksPublicKeyBuffer;
 
@@ -590,7 +590,7 @@ impl StacksTransaction {
     }
 
     /// set sponsor nonce
-    pub fn set_sponsor_nonce(&mut self, n: u64) -> Result<(), Error> {
+    pub fn set_sponsor_nonce(&mut self, n: u64) -> Result<(), ChainstateError> {
         self.auth.set_sponsor_nonce(n)
     }
 
@@ -868,13 +868,13 @@ impl StacksTransactionSigner {
     pub fn new_sponsor(
         tx: &StacksTransaction,
         spending_condition: TransactionSpendingCondition,
-    ) -> Result<StacksTransactionSigner, Error> {
+    ) -> Result<StacksTransactionSigner, ChainstateError> {
         if !tx.auth.is_sponsored() {
-            return Err(Error::IncompatibleSpendingConditionError);
+            return Err(ChainstateError::IncompatibleSpendingConditionError);
         }
         let mut new_tx = tx.clone();
         new_tx.auth.set_sponsor(spending_condition)?;
-        let origin_sighash = new_tx.verify_origin().map_err(Error::NetError)?;
+        let origin_sighash = new_tx.verify_origin().map_err(ChainstateError::NetError)?;
 
         Ok(StacksTransactionSigner {
             tx: new_tx,

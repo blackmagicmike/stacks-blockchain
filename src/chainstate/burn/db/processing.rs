@@ -35,11 +35,11 @@ use burnchains::{
 
 use chainstate::stacks::db::StacksChainState;
 use chainstate::stacks::index::{
-    marf::MARF, storage::TrieFileStorage, Error as MARFError, MARFValue, MarfTrieId, TrieHash,
+    marf::MARF, storage::TrieFileStorage, MARFValue, MarfTrieId, TrieHash,
 };
 use core::INITIAL_MINING_BONUS_WINDOW;
 
-use util::db::Error as DBError;
+use crate::util::errors::{DBError, MarfError as MARFError};
 
 use address::AddressHashMode;
 

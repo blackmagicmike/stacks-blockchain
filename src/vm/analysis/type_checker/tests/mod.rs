@@ -14,13 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use vm::analysis::errors::CheckErrors;
+use crate::util::errors::ParseErrors;
+use util::errors::CheckErrors;
 use vm::analysis::mem_type_check;
 use vm::analysis::type_check;
 use vm::analysis::type_checker::{TypeChecker, TypeResult, TypingContext};
 use vm::analysis::types::ContractAnalysis;
 use vm::analysis::AnalysisDatabase;
-use vm::ast::errors::ParseErrors;
 use vm::ast::{build_ast, parse};
 use vm::contexts::OwnedEnvironment;
 use vm::representations::SymbolicExpression;

@@ -16,7 +16,7 @@
 
 use util::db;
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 
 pub trait ChainstateDB {
     fn backup(backup_path: &String) -> Result<(), db_error>;

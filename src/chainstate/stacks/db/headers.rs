@@ -24,14 +24,14 @@ use std::io::prelude::*;
 
 use chainstate::burn::ConsensusHash;
 
+use crate::util::errors::ChainstateError;
 use chainstate::stacks::db::*;
-use chainstate::stacks::Error;
 use chainstate::stacks::*;
 
 use std::path::{Path, PathBuf};
 use vm::costs::ExecutionCost;
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 use util::db::{
     query_count, query_row, query_row_columns, query_row_panic, query_rows, DBConn, FromColumn,
     FromRow,
@@ -118,7 +118,7 @@ impl StacksChainState {
         parent_id: &StacksBlockId,
         tip_info: &StacksHeaderInfo,
         anchored_block_cost: &ExecutionCost,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         assert_eq!(
             tip_info.block_height,
             tip_info.anchored_header.total_work.work
@@ -191,7 +191,7 @@ impl StacksChainState {
                     block_size,
                     parent_block_id) \
                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)", args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         Ok(())
     }
@@ -199,24 +199,24 @@ impl StacksChainState {
     pub fn get_stacks_block_anchored_cost(
         conn: &DBConn,
         block: &StacksBlockId,
-    ) -> Result<Option<ExecutionCost>, Error> {
+    ) -> Result<Option<ExecutionCost>, ChainstateError> {
         let qry = "SELECT cost FROM block_headers WHERE index_block_hash = ?";
         conn.query_row(qry, &[block], |row| row.get(0))
             .optional()
-            .map_err(|e| Error::from(db_error::from(e)))
+            .map_err(|e| ChainstateError::from(db_error::from(e)))
     }
 
     pub fn is_stacks_block_processed(
         conn: &Connection,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         let sql = "SELECT 1 FROM block_headers WHERE consensus_hash = ?1 AND block_hash = ?2";
         let args: &[&dyn ToSql] = &[&consensus_hash, &block_hash];
         match conn.query_row(sql, args, |_| Ok(true)) {
             Ok(_) => Ok(true),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
-            Err(e) => Err(Error::DBError(e.into())),
+            Err(e) => Err(ChainstateError::DBError(e.into())),
         }
     }
 
@@ -226,12 +226,12 @@ impl StacksChainState {
         conn: &Connection,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<StacksHeaderInfo>, Error> {
+    ) -> Result<Option<StacksHeaderInfo>, ChainstateError> {
         let sql =
             "SELECT * FROM block_headers WHERE consensus_hash = ?1 AND block_hash = ?2".to_string();
         let args: &[&dyn ToSql] = &[&consensus_hash, &block_hash];
-        let mut rows =
-            query_rows::<StacksHeaderInfo, _>(conn, &sql, args).map_err(Error::DBError)?;
+        let mut rows = query_rows::<StacksHeaderInfo, _>(conn, &sql, args)
+            .map_err(ChainstateError::DBError)?;
         if rows.len() > 1 {
             unreachable!("FATAL: multiple rows for the same block hash") // should be unreachable, since block_hash/consensus_hash is the primary key
         }
@@ -244,12 +244,12 @@ impl StacksChainState {
     pub fn get_stacks_block_header_info_by_index_block_hash(
         conn: &Connection,
         index_block_hash: &StacksBlockId,
-    ) -> Result<Option<StacksHeaderInfo>, Error> {
+    ) -> Result<Option<StacksHeaderInfo>, ChainstateError> {
         let sql = "SELECT * FROM block_headers WHERE index_block_hash = ?1".to_string();
         query_row_panic(conn, &sql, &[&index_block_hash], || {
             "FATAL: multiple rows for the same block hash".to_string()
         })
-        .map_err(Error::DBError)
+        .map_err(ChainstateError::DBError)
     }
 
     /// Get an ancestor block header
@@ -257,7 +257,7 @@ impl StacksChainState {
         tx: &mut StacksDBTx,
         tip: &StacksHeaderInfo,
         height: u64,
-    ) -> Result<Option<StacksHeaderInfo>, Error> {
+    ) -> Result<Option<StacksHeaderInfo>, ChainstateError> {
         assert!(tip.block_height >= height);
         StacksChainState::get_index_tip_ancestor(tx, &tip.index_block_hash(), height)
     }
@@ -267,10 +267,10 @@ impl StacksChainState {
         tx: &mut StacksDBTx,
         tip_index_hash: &StacksBlockId,
         height: u64,
-    ) -> Result<Option<StacksHeaderInfo>, Error> {
+    ) -> Result<Option<StacksHeaderInfo>, ChainstateError> {
         match tx
             .get_ancestor_block_hash(height, tip_index_hash)
-            .map_err(Error::DBError)?
+            .map_err(ChainstateError::DBError)?
         {
             Some(bhh) => {
                 StacksChainState::get_stacks_block_header_info_by_index_block_hash(tx, &bhh)
@@ -284,10 +284,10 @@ impl StacksChainState {
         conn: &StacksDBConn,
         tip_index_hash: &StacksBlockId,
         height: u64,
-    ) -> Result<Option<StacksHeaderInfo>, Error> {
+    ) -> Result<Option<StacksHeaderInfo>, ChainstateError> {
         match conn
             .get_ancestor_block_hash(height, tip_index_hash)
-            .map_err(Error::DBError)?
+            .map_err(ChainstateError::DBError)?
         {
             Some(bhh) => {
                 StacksChainState::get_stacks_block_header_info_by_index_block_hash(conn, &bhh)
@@ -297,7 +297,7 @@ impl StacksChainState {
     }
 
     /// Get the genesis (boot code) block header
-    pub fn get_genesis_header_info(conn: &Connection) -> Result<StacksHeaderInfo, Error> {
+    pub fn get_genesis_header_info(conn: &Connection) -> Result<StacksHeaderInfo, ChainstateError> {
         // by construction, only one block can have height 0 in this DB
         let sql = "SELECT * FROM block_headers WHERE consensus_hash = ?1 AND block_height = 0";
         let args: &[&dyn ToSql] = &[&FIRST_BURNCHAIN_CONSENSUS_HASH];
@@ -309,7 +309,7 @@ impl StacksChainState {
     pub fn get_parent_block_id(
         conn: &Connection,
         block_id: &StacksBlockId,
-    ) -> Result<Option<StacksBlockId>, Error> {
+    ) -> Result<Option<StacksBlockId>, ChainstateError> {
         let sql = "SELECT parent_block_id FROM block_headers WHERE index_block_hash = ?1 LIMIT 1"
             .to_string();
         let args: &[&dyn ToSql] = &[block_id];
@@ -318,13 +318,16 @@ impl StacksChainState {
     }
 
     /// Is this block present and processed?
-    pub fn has_stacks_block(conn: &Connection, block_id: &StacksBlockId) -> Result<bool, Error> {
+    pub fn has_stacks_block(
+        conn: &Connection,
+        block_id: &StacksBlockId,
+    ) -> Result<bool, ChainstateError> {
         let sql = "SELECT 1 FROM block_headers WHERE index_block_hash = ?1 LIMIT 1";
         let args: &[&dyn ToSql] = &[block_id];
         Ok(conn
             .query_row(sql, args, |_r| Ok(()))
             .optional()
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?
             .is_some())
     }
 }

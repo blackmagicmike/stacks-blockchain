@@ -14,20 +14,20 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use vm::analysis::errors::CheckErrors;
-use vm::contexts::OwnedEnvironment;
-use vm::database::{ClarityDatabase, MarfedKV, NULL_BURN_STATE_DB, NULL_HEADER_DB};
-use vm::errors::{Error, InterpreterResult as Result, RuntimeErrorType};
-use vm::representations::SymbolicExpression;
-use vm::types::Value;
-use vm::types::{PrincipalData, QualifiedContractIdentifier};
-
-use vm::tests::{execute, is_committed, is_err_code, symbols_from_values};
-
 use chainstate::burn::BlockHeaderHash;
 use chainstate::stacks::index::storage::TrieFileStorage;
 use chainstate::stacks::index::MarfTrieId;
 use chainstate::stacks::StacksBlockId;
+use util::errors::CheckErrors;
+use vm::contexts::OwnedEnvironment;
+use vm::database::{ClarityDatabase, MarfedKV, NULL_BURN_STATE_DB, NULL_HEADER_DB};
+use vm::errors::InterpreterResult as Result;
+use vm::representations::SymbolicExpression;
+use vm::tests::{execute, is_committed, is_err_code, symbols_from_values};
+use vm::types::Value;
+use vm::types::{PrincipalData, QualifiedContractIdentifier};
+
+use crate::util::errors::{InterpreterError, RuntimeErrorType};
 
 const p1_str: &str = "'SZ2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKQ9H6DPR";
 
@@ -171,7 +171,7 @@ fn test_at_block_good() {
             let resp = branch(x, 1, "reset").unwrap_err();
             eprintln!("{}", resp);
             match resp {
-                Error::Runtime(x, _) => assert_eq!(
+                InterpreterError::Runtime(x, _) => assert_eq!(
                     x,
                     RuntimeErrorType::UnknownBlockHeaderHash(BlockHeaderHash::from(
                         vec![2 as u8; 32].as_slice()
@@ -207,7 +207,7 @@ fn test_at_block_missing_defines() {
             .unwrap();
     }
 
-    fn initialize_2(owned_env: &mut OwnedEnvironment) -> Error {
+    fn initialize_2(owned_env: &mut OwnedEnvironment) -> InterpreterError {
         let c_b = QualifiedContractIdentifier::local("contract-b").unwrap();
 
         let contract = "(define-private (problematic-cc)

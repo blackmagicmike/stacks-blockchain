@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::collections::HashMap;
+
 use vm::analysis::types::{AnalysisPass, ContractAnalysis};
 use vm::functions::define::DefineFunctionsParsed;
 use vm::functions::tuples;
@@ -23,14 +25,15 @@ use vm::representations::SymbolicExpressionType::{
 };
 use vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 use vm::types::{parse_name_type_pairs, PrincipalData, TupleTypeSignature, TypeSignature, Value};
-
-use std::collections::HashMap;
 use vm::variables::NativeVariables;
 
-pub use super::errors::{
-    check_argument_count, check_arguments_at_least, CheckError, CheckErrors, CheckResult,
-};
+pub use crate::util::errors::CheckError;
+pub use crate::vm::analysis::check_argument_count;
+pub use crate::vm::analysis::check_arguments_at_least;
+pub use crate::vm::analysis::CheckResult;
+
 use super::AnalysisDatabase;
+use util::errors::CheckErrors;
 
 #[cfg(test)]
 mod tests;

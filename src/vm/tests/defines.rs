@@ -15,13 +15,15 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use vm::ast::build_ast;
-use vm::ast::errors::ParseErrors;
-use vm::errors::{CheckErrors, Error, RuntimeErrorType};
+use vm::errors::CheckErrors;
 use vm::execute;
 use vm::types::{QualifiedContractIdentifier, TypeSignature, Value};
 
-fn assert_eq_err(e1: CheckErrors, e2: Error) {
-    let e1: Error = e1.into();
+use crate::util::errors::ParseErrors;
+use crate::util::errors::{InterpreterError, RuntimeErrorType};
+
+fn assert_eq_err(e1: CheckErrors, e2: InterpreterError) {
+    let e1: InterpreterError = e1.into();
     assert_eq!(e1, e2)
 }
 
@@ -55,7 +57,7 @@ fn test_accept_options() {
         format!("{} {}", defun, "(f (some 1))"),
         format!("{} {}", defun, "(f (some true))"),
     ];
-    let expectations: &[Result<_, Error>] = &[
+    let expectations: &[Result<_, InterpreterError>] = &[
         Ok(Some(Value::Int(0))),
         Ok(Some(Value::Int(10))),
         Err(CheckErrors::TypeValueError(
@@ -175,7 +177,7 @@ fn test_stack_depth() {
 
     assert_eq!(Ok(Some(Value::Int(64))), execute(&test0));
     assert!(match execute(&test1).unwrap_err() {
-        Error::Runtime(RuntimeErrorType::MaxStackDepthReached, _) => true,
+        InterpreterError::Runtime(RuntimeErrorType::MaxStackDepthReached, _) => true,
         _ => false,
     })
 }

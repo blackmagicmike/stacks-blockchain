@@ -14,9 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::vm::ast::ParseResult;
 use std::collections::{HashMap, HashSet};
 use std::vec::Drain;
-use vm::ast::errors::ParseResult;
 use vm::representations::{PreSymbolicExpression, SymbolicExpression, TraitDefinition};
 use vm::types::signatures::FunctionSignature;
 use vm::types::{QualifiedContractIdentifier, TraitIdentifier};

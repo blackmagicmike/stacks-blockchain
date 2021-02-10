@@ -37,9 +37,9 @@ use burnchains::BurnchainHeaderHash;
 use burnchains::BurnchainTransaction;
 use burnchains::Txid;
 
+use crate::util::errors::NetworkError as net_error;
 use crate::util::messages::write_next;
 use crate::util::messages::StacksMessageCodec;
-use net::Error as net_error;
 
 use util::hash::Hash160;
 use util::log;

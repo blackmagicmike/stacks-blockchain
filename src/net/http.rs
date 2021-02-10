@@ -36,6 +36,8 @@ use serde_json;
 use time;
 use url::{form_urlencoded, Url};
 
+use crate::util::errors::ClientError;
+use crate::util::errors::NetworkError as net_error;
 use burnchains::{Address, Txid};
 use chainstate::burn::BlockHeaderHash;
 use chainstate::burn::ConsensusHash;
@@ -45,8 +47,6 @@ use chainstate::stacks::{
 use deps::httparse;
 use net::atlas::Attachment;
 use net::CallReadOnlyRequestBody;
-use net::ClientError;
-use net::Error as net_error;
 use net::HttpContentType;
 use net::HttpRequestMetadata;
 use net::HttpRequestPreamble;

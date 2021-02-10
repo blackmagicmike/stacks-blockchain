@@ -16,8 +16,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::vm::ast::ParseResult;
 use vm::analysis::AnalysisDatabase;
-use vm::ast::errors::{ParseError, ParseErrors, ParseResult};
 use vm::ast::types::{BuildASTPass, ContractAST, PreExpressionsDrain};
 use vm::functions::define::{DefineFunctions, DefineFunctionsParsed};
 use vm::functions::NativeFunctions;
@@ -28,6 +28,8 @@ use vm::representations::{
     ClarityName, PreSymbolicExpression, SymbolicExpression, TraitDefinition,
 };
 use vm::types::{QualifiedContractIdentifier, TraitIdentifier, Value};
+
+use crate::util::errors::{ParseError, ParseErrors};
 
 pub struct TraitsResolver {}
 

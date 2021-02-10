@@ -18,12 +18,12 @@ use vm;
 use vm::contexts::{Environment, LocalContext};
 use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{cost_functions, runtime_cost, CostTracker, MemoryConsumer};
-use vm::errors::{
-    check_argument_count, check_arguments_at_least, CheckErrors, InterpreterResult as Result,
-    RuntimeErrorType, ShortReturnType,
-};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
 use vm::types::{OptionalData, ResponseData, TypeSignature, Value};
 use vm::{ClarityName, SymbolicExpression};
+
+use crate::util::errors::{RuntimeErrorType, ShortReturnType};
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least};
 
 fn inner_unwrap(to_unwrap: Value) -> Result<Option<Value>> {
     let result = match to_unwrap {

@@ -45,7 +45,7 @@ use sha2::Sha256;
 
 use chainstate::burn::db::sortdb::{PoxId, SortitionHandleTx, SortitionId};
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 
 use core::SYSTEM_FORK_SET_VERSION;
 
@@ -394,7 +394,7 @@ mod tests {
     use burnchains::bitcoin::address::BitcoinAddress;
     use burnchains::bitcoin::keys::BitcoinPublicKey;
 
-    use util::db::Error as db_error;
+    use crate::util::errors::DBError as db_error;
     use util::hash::{hex_bytes, Hash160};
     use util::log;
 

@@ -17,17 +17,15 @@
 use std::cmp;
 use std::convert::{TryFrom, TryInto};
 
-use vm::functions::tuples;
-
 use chainstate::stacks::StacksBlockId;
 use vm::callables::DefineType;
+use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{
     constants as cost_constants, cost_functions, runtime_cost, CostTracker, MemoryConsumer,
 };
-use vm::errors::{
-    check_argument_count, check_arguments_at_least, CheckErrors, InterpreterError,
-    InterpreterResult as Result, RuntimeErrorType,
-};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
+use vm::functions::special::handle_contract_call_special_cases;
+use vm::functions::tuples;
 use vm::representations::{SymbolicExpression, SymbolicExpressionType};
 use vm::types::{
     BlockInfoProperty, BuffData, OptionalData, PrincipalData, SequenceData, TypeSignature, Value,
@@ -35,8 +33,8 @@ use vm::types::{
 };
 use vm::{eval, Environment, LocalContext};
 
-use vm::costs::cost_functions::ClarityCostFunction;
-use vm::functions::special::handle_contract_call_special_cases;
+use crate::util::errors::{InterpreterFailureError, RuntimeErrorType};
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least};
 
 pub fn special_contract_call(
     args: &[SymbolicExpression],

@@ -30,6 +30,8 @@ use rusqlite::TransactionBehavior;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, NO_PARAMS};
 use sha2::{Digest, Sha512Trunc256};
 
+use crate::util::errors::NetworkError as NetError;
+use crate::util::errors::{DBError as db_error, MarfError as MARFError};
 use address::AddressHashMode;
 use burnchains::bitcoin::BitcoinNetworkType;
 use burnchains::{Address, BurnchainHeaderHash, Txid};
@@ -52,7 +54,7 @@ use chainstate::stacks::db::{StacksChainState, StacksHeaderInfo};
 use chainstate::stacks::index::marf::MarfConnection;
 use chainstate::stacks::index::marf::MARF;
 use chainstate::stacks::index::storage::TrieFileStorage;
-use chainstate::stacks::index::{Error as MARFError, MARFValue, MarfTrieId, TrieHash};
+use chainstate::stacks::index::{MARFValue, MarfTrieId, TrieHash};
 use chainstate::stacks::StacksAddress;
 use chainstate::stacks::StacksPublicKey;
 use chainstate::stacks::*;
@@ -61,10 +63,8 @@ use core::CHAINSTATE_VERSION;
 use core::FIRST_BURNCHAIN_CONSENSUS_HASH;
 use core::FIRST_STACKS_BLOCK_HASH;
 use net::neighbors::MAX_NEIGHBOR_BLOCK_DELAY;
-use net::Error as NetError;
 use util::db::tx_begin_immediate;
 use util::db::tx_busy_handler;
-use util::db::Error as db_error;
 use util::db::{
     db_mkdirs, query_count, query_row, query_row_columns, query_row_panic, query_rows, sql_pragma,
     u64_to_sql, DBConn, FromColumn, FromRow, IndexDBConn, IndexDBTx,
@@ -3969,6 +3969,7 @@ pub mod tests {
     use std::sync::mpsc::sync_channel;
     use std::thread;
 
+    use crate::util::errors::DBError as db_error;
     use address::AddressHashMode;
     use burnchains::bitcoin::address::BitcoinAddress;
     use burnchains::bitcoin::keys::BitcoinPublicKey;
@@ -3982,7 +3983,6 @@ pub mod tests {
     use chainstate::stacks::StacksAddress;
     use chainstate::stacks::StacksPublicKey;
     use core::*;
-    use util::db::Error as db_error;
     use util::get_epoch_time_secs;
     use util::hash::{hex_bytes, Hash160};
     use util::vrf::*;

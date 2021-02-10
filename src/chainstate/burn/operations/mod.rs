@@ -21,6 +21,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 
+use crate::util::errors::DBError as db_error;
 use burnchains::Burnchain;
 use burnchains::BurnchainBlockHeader;
 use burnchains::Error as BurnchainError;
@@ -39,7 +40,6 @@ use chainstate::stacks::index::TrieHash;
 use chainstate::stacks::StacksAddress;
 use util::db::DBConn;
 use util::db::DBTx;
-use util::db::Error as db_error;
 use util::hash::Hash160;
 use util::hash::Sha512Trunc256Sum;
 use util::secp256k1::MessageSignature;

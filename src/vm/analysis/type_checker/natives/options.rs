@@ -14,16 +14,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use vm::analysis::type_checker::{no_type, TypeChecker, TypeResult, TypingContext};
+use vm::costs::cost_functions::ClarityCostFunction;
+use vm::costs::{analysis_typecheck_cost, cost_functions, runtime_cost};
 use vm::representations::{ClarityName, SymbolicExpression};
 use vm::types::TypeSignature;
 
-use vm::analysis::type_checker::{
-    check_argument_count, check_arguments_at_least, no_type, CheckError, CheckErrors, TypeChecker,
-    TypeResult, TypingContext,
-};
-
-use vm::costs::cost_functions::ClarityCostFunction;
-use vm::costs::{analysis_typecheck_cost, cost_functions, runtime_cost};
+use crate::util::errors::CheckError;
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least};
+use util::errors::CheckErrors;
 
 pub fn check_special_okay(
     checker: &mut TypeChecker,

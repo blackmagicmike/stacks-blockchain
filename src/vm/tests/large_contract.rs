@@ -20,14 +20,14 @@ use chainstate::stacks::index::MarfTrieId;
 use chainstate::stacks::StacksBlockId;
 use util::hash::hex_bytes;
 use vm::ast;
-use vm::clarity::{ClarityInstance, Error as ClarityError};
+use vm::clarity::ClarityInstance;
 use vm::contexts::{Environment, GlobalContext, OwnedEnvironment};
 use vm::contracts::Contract;
 use vm::costs::ExecutionCost;
 use vm::database::{
     ClarityDatabase, MarfedKV, MemoryBackingStore, NULL_BURN_STATE_DB, NULL_HEADER_DB,
 };
-use vm::errors::{CheckErrors, Error, RuntimeErrorType};
+use vm::errors::CheckErrors;
 use vm::execute as vm_execute;
 use vm::representations::SymbolicExpression;
 use vm::tests::{execute, symbols_from_values, with_marfed_environment, with_memory_environment};
@@ -35,6 +35,8 @@ use vm::types::{
     OptionalData, PrincipalData, QualifiedContractIdentifier, ResponseData, StandardPrincipalData,
     TypeSignature, Value,
 };
+
+use crate::util::errors::{ClarityError, InterpreterError, RuntimeErrorType};
 
 /*
  * This test exhibits memory inflation --

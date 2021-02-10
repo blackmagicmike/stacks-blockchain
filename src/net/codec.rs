@@ -38,7 +38,6 @@ use chainstate::stacks::StacksTransaction;
 use chainstate::stacks::MAX_BLOCK_LEN;
 use core::PEER_VERSION_TESTNET;
 use net::db::LocalPeer;
-use net::Error as net_error;
 use net::*;
 use util::hash::to_hex;
 use util::hash::DoubleSha256;
@@ -50,6 +49,7 @@ use util::secp256k1::MessageSignature;
 use util::secp256k1::MESSAGE_SIGNATURE_ENCODED_SIZE;
 use util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
 
+use crate::util::errors::{NetworkError as net_error, NetworkError};
 use crate::util::messages;
 use crate::util::messages::StacksMessageCodec;
 use crate::util::secp256k1::StacksPublicKeyBuffer;
@@ -1318,7 +1318,7 @@ impl ProtocolFamily for StacksP2P {
         key: &StacksPublicKey,
         preamble: &Preamble,
         bytes: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), NetworkError> {
         preamble
             .clone()
             .verify(&bytes[0..(preamble.payload_len as usize)], key)

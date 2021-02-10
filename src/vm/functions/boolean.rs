@@ -16,12 +16,12 @@
 
 use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{cost_functions, runtime_cost};
-use vm::errors::{
-    check_argument_count, check_arguments_at_least, CheckErrors, InterpreterResult as Result,
-};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
 use vm::representations::SymbolicExpression;
 use vm::types::{TypeSignature, Value};
 use vm::{eval, Environment, LocalContext};
+
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least};
 
 fn type_force_bool(value: &Value) -> Result<bool> {
     match *value {

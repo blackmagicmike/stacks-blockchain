@@ -1,6 +1,3 @@
-use super::{BurnchainController, BurnchainTip, Config, EventDispatcher, Keychain, Tenure};
-use crate::{genesis_data::USE_TEST_GENESIS_CHAINSTATE, run_loop::RegisteredKey};
-
 use std::convert::TryFrom;
 use std::default::Default;
 use std::net::SocketAddr;
@@ -17,6 +14,7 @@ use stacks::chainstate::stacks::db::{
     ChainStateBootData, ClarityTx, StacksChainState, StacksHeaderInfo,
 };
 use stacks::chainstate::stacks::events::StacksTransactionReceipt;
+use stacks::chainstate::stacks::index::TrieHash;
 use stacks::chainstate::stacks::{
     CoinbasePayload, StacksAddress, StacksBlock, StacksBlockHeader, StacksMicroblock,
     StacksTransaction, StacksTransactionSigner, TransactionAnchorMode, TransactionPayload,
@@ -28,8 +26,14 @@ use stacks::net::{
     db::PeerDB,
     p2p::PeerNetwork,
     rpc::RPCHandlerArgs,
-    Error as NetError, PeerAddress,
+    PeerAddress,
 };
+use stacks::util::errors::NetworkError as NetError;
+use stacks::util::get_epoch_time_secs;
+use stacks::util::hash::Sha256Sum;
+use stacks::util::secp256k1::Secp256k1PrivateKey;
+use stacks::util::strings::UrlString;
+use stacks::util::vrf::VRFPublicKey;
 use stacks::{
     burnchains::{Burnchain, BurnchainHeaderHash, Txid},
     chainstate::stacks::db::{
@@ -38,12 +42,9 @@ use stacks::{
     },
 };
 
-use stacks::chainstate::stacks::index::TrieHash;
-use stacks::util::get_epoch_time_secs;
-use stacks::util::hash::Sha256Sum;
-use stacks::util::secp256k1::Secp256k1PrivateKey;
-use stacks::util::strings::UrlString;
-use stacks::util::vrf::VRFPublicKey;
+use crate::{genesis_data::USE_TEST_GENESIS_CHAINSTATE, run_loop::RegisteredKey};
+
+use super::{BurnchainController, BurnchainTip, Config, EventDispatcher, Keychain, Tenure};
 
 #[derive(Debug, Clone)]
 pub struct ChainTip {

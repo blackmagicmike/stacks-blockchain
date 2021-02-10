@@ -35,8 +35,8 @@ use util::vrf::*;
 
 use chainstate::burn::{BlockHeaderHash, ConsensusHash, OpsHash, SortitionHash, VRFSeed};
 
+use crate::util::errors::DBError as db_error;
 use util::db;
-use util::db::Error as db_error;
 use util::db::FromColumn;
 
 use chainstate::stacks::index::TrieHash;

@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::util::errors::ChainstateError;
 use chainstate::stacks::db::StacksChainState;
-use chainstate::stacks::Error;
 use chainstate::stacks::StacksAddress;
 use chainstate::stacks::StacksBlockHeader;
 use vm::database::ClarityDatabase;
@@ -169,7 +169,7 @@ impl StacksChainState {
         stacks_block_id: &StacksBlockId,
         boot_contract_name: &str,
         code: &str,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value, ChainstateError> {
         let iconn = sortdb.index_conn();
         let dbconn = self.state_index.sqlite_conn();
         self.clarity_state
@@ -180,7 +180,7 @@ impl StacksChainState {
                 &boot_code_id(boot_contract_name, self.mainnet),
                 code,
             )
-            .map_err(Error::ClarityError)
+            .map_err(ChainstateError::ClarityError)
     }
 
     pub fn get_liquid_ustx(&mut self, stacks_block_id: &StacksBlockId) -> u128 {
@@ -201,7 +201,7 @@ impl StacksChainState {
         &mut self,
         sortdb: &SortitionDB,
         stacks_block_id: &StacksBlockId,
-    ) -> Result<u128, Error> {
+    ) -> Result<u128, ChainstateError> {
         self.eval_boot_code_read_only(
             sortdb,
             stacks_block_id,
@@ -218,7 +218,7 @@ impl StacksChainState {
         sortdb: &SortitionDB,
         stacks_block_id: &StacksBlockId,
         reward_cycle: u128,
-    ) -> Result<u128, Error> {
+    ) -> Result<u128, ChainstateError> {
         self.eval_boot_code_read_only(
             sortdb,
             stacks_block_id,
@@ -234,7 +234,7 @@ impl StacksChainState {
         sortdb: &SortitionDB,
         stacks_block_id: &StacksBlockId,
         reward_cycle: u128,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         self.eval_boot_code_read_only(
             sortdb,
             stacks_block_id,
@@ -320,10 +320,10 @@ impl StacksChainState {
         sortdb: &SortitionDB,
         current_burn_height: u64,
         block_id: &StacksBlockId,
-    ) -> Result<Vec<(StacksAddress, u128)>, Error> {
+    ) -> Result<Vec<(StacksAddress, u128)>, ChainstateError> {
         let reward_cycle = burnchain
             .block_height_to_reward_cycle(current_burn_height)
-            .ok_or(Error::PoxNoRewardCycle)?;
+            .ok_or(ChainstateError::PoxNoRewardCycle)?;
 
         if !self.is_pox_active(sortdb, block_id, reward_cycle as u128)? {
             debug!(
@@ -402,6 +402,7 @@ mod contract_tests;
 
 #[cfg(test)]
 pub mod test {
+    use crate::util::errors::ChainstateError as chainstate_error;
     use chainstate::burn::db::sortdb::*;
     use chainstate::burn::db::*;
     use chainstate::burn::operations::BlockstackOperationType;
@@ -410,7 +411,6 @@ pub mod test {
     use chainstate::stacks::db::*;
     use chainstate::stacks::miner::test::*;
     use chainstate::stacks::miner::*;
-    use chainstate::stacks::Error as chainstate_error;
     use chainstate::stacks::*;
 
     use crate::util::secp256k1::PublicKey;

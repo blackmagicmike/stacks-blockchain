@@ -16,9 +16,10 @@
 
 use std::convert::From;
 use std::convert::TryFrom;
+
 use vm::contexts::OwnedEnvironment;
 use vm::database::MemoryBackingStore;
-use vm::errors::{CheckErrors, Error, RuntimeErrorType, ShortReturnType};
+use vm::errors::CheckErrors;
 use vm::execute;
 use vm::types::{
     ListData, QualifiedContractIdentifier, SequenceData, StandardPrincipalData, TupleData,
@@ -26,7 +27,9 @@ use vm::types::{
 };
 use vm::ClarityName;
 
-fn assert_executes(expected: Result<Value, Error>, input: &str) {
+use crate::util::errors::{InterpreterError, RuntimeErrorType, ShortReturnType};
+
+fn assert_executes(expected: Result<Value, InterpreterError>, input: &str) {
     assert_eq!(expected.unwrap(), execute(input).unwrap().unwrap());
 }
 
@@ -499,7 +502,7 @@ fn lists_system_2() {
         (map-insert lists (tuple (name 1)) (tuple (contentious (list 1 2 6))))";
 
     match execute(test) {
-        Err(Error::Unchecked(CheckErrors::TypeError(_, _))) => true,
+        Err(InterpreterError::Unchecked(CheckErrors::TypeError(_, _))) => true,
         _ => false,
     };
 }
@@ -564,7 +567,7 @@ fn lists_system() {
         let test = execute(test);
         println!("{:#?}", test);
         let expected_type_error = match test {
-            Err(Error::Unchecked(CheckErrors::TypeValueError(_, _))) => true,
+            Err(InterpreterError::Unchecked(CheckErrors::TypeValueError(_, _))) => true,
             _ => false,
         };
 
@@ -630,7 +633,7 @@ fn tuples_system() {
 
     for test in type_error_tests.iter() {
         let expected_type_error = match execute(test) {
-            Err(Error::Unchecked(CheckErrors::TypeValueError(_, _))) => true,
+            Err(InterpreterError::Unchecked(CheckErrors::TypeValueError(_, _))) => true,
             _ => {
                 println!("{:?}", execute(test));
                 false
@@ -650,7 +653,7 @@ fn bad_define_maps() {
         "(define-map lists { name: int } contents 5)",
         "(define-map lists { name: int } { contents: (list 5 0 int) })",
     ];
-    let mut expected: Vec<Error> = vec![
+    let mut expected: Vec<InterpreterError> = vec![
         CheckErrors::BadSyntaxExpectedListOfPairs.into(),
         CheckErrors::UnknownTypeName("contents".to_string()).into(),
         CheckErrors::ExpectedName.into(),
@@ -776,7 +779,7 @@ fn test_non_tuple_map_get_set() {
 
     for test in type_error_tests.iter() {
         let expected_type_error = match execute(test) {
-            Err(Error::Unchecked(CheckErrors::TypeValueError(_, _))) => true,
+            Err(InterpreterError::Unchecked(CheckErrors::TypeValueError(_, _))) => true,
             _ => {
                 println!("{:?}", execute(test));
                 false

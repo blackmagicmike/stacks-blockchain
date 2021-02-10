@@ -29,6 +29,10 @@ use chainstate::burn::{
     operations::BlockstackOperationType,
     BlockHeaderHash, BlockSnapshot, ConsensusHash,
 };
+use chainstate::coordinator::comm::{
+    ArcCounterCoordinatorNotices, CoordinatorEvents, CoordinatorNotices, CoordinatorReceivers,
+};
+use chainstate::stacks::index::MarfTrieId;
 use chainstate::stacks::{
     boot::boot_code_id,
     db::{
@@ -36,29 +40,23 @@ use chainstate::stacks::{
         StacksHeaderInfo,
     },
     events::{StacksTransactionEvent, StacksTransactionReceipt, TransactionOrigin},
-    Error as ChainstateError, StacksAddress, StacksBlock, StacksBlockHeader, StacksBlockId,
-    TransactionPayload,
+    StacksAddress, StacksBlock, StacksBlockHeader, StacksBlockId, TransactionPayload,
 };
 use monitoring::increment_stx_blocks_processed_counter;
 use net::atlas::{AtlasConfig, AttachmentInstance};
-use util::db::Error as DBError;
 use vm::{
     costs::ExecutionCost,
     types::{PrincipalData, QualifiedContractIdentifier},
     Value,
 };
 
-pub mod comm;
-use chainstate::stacks::index::MarfTrieId;
-
-#[cfg(test)]
-pub mod tests;
+use crate::util::errors::{ChainstateError, DBError};
 
 pub use self::comm::CoordinatorCommunication;
 
-use chainstate::coordinator::comm::{
-    ArcCounterCoordinatorNotices, CoordinatorEvents, CoordinatorNotices, CoordinatorReceivers,
-};
+pub mod comm;
+#[cfg(test)]
+pub mod tests;
 
 /// The 3 different states for the current
 ///  reward cycle's relationship to its PoX anchor

@@ -15,10 +15,14 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::convert::TryFrom;
-use vm::errors::{check_argument_count, CheckErrors, InterpreterResult, RuntimeErrorType};
-use vm::types::{TypeSignature, Value};
 
 use integer_sqrt::IntegerSquareRoot;
+
+use vm::errors::{CheckErrors, InterpreterResult};
+use vm::types::{TypeSignature, Value};
+
+use crate::util::errors::RuntimeErrorType;
+use crate::vm::analysis::check_argument_count;
 
 struct U128Ops();
 struct I128Ops();

@@ -33,7 +33,7 @@ use serde::export::fmt;
 use serde::ser::Error as ser_Error;
 use serde::Serialize;
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 use util::db::FromColumn;
 use util::hash::{hex_bytes, to_hex};
 

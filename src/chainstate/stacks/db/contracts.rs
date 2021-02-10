@@ -20,13 +20,13 @@ use std::fs;
 use std::io;
 use std::io::prelude::*;
 
+use crate::util::errors::ChainstateError;
 use chainstate::stacks::db::*;
-use chainstate::stacks::Error;
 use chainstate::stacks::*;
 
 use std::path::{Path, PathBuf};
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 use util::db::{query_count, query_rows, DBConn};
 
 use util::strings::StacksString;
@@ -35,7 +35,7 @@ use util::hash::to_hex;
 
 use chainstate::burn::db::sortdb::*;
 
-use net::Error as net_error;
+use crate::util::errors::NetworkError as net_error;
 
 use vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 
@@ -47,8 +47,8 @@ use vm::types::{AssetIdentifier, Value};
 
 use vm::clarity::ClarityConnection;
 
-pub use vm::analysis::errors::CheckErrors;
-use vm::errors::Error as clarity_vm_error;
+use crate::util::errors::InterpreterError as clarity_vm_error;
+pub use util::errors::CheckErrors;
 
 use vm::database::ClarityDatabase;
 
@@ -58,21 +58,21 @@ impl StacksChainState {
     pub fn get_contract<T: ClarityConnection>(
         clarity_tx: &mut T,
         contract_id: &QualifiedContractIdentifier,
-    ) -> Result<Option<Contract>, Error> {
+    ) -> Result<Option<Contract>, ChainstateError> {
         clarity_tx
             .with_clarity_db_readonly(|ref mut db| match db.get_contract(contract_id) {
                 Ok(c) => Ok(Some(c)),
                 Err(clarity_vm_error::Unchecked(CheckErrors::NoSuchContract(_))) => Ok(None),
                 Err(e) => Err(clarity_error::Interpreter(e)),
             })
-            .map_err(Error::ClarityError)
+            .map_err(ChainstateError::ClarityError)
     }
 
     pub fn get_data_var<T: ClarityConnection>(
         clarity_tx: &mut T,
         contract_id: &QualifiedContractIdentifier,
         data_var: &str,
-    ) -> Result<Option<Value>, Error> {
+    ) -> Result<Option<Value>, ChainstateError> {
         clarity_tx
             .with_clarity_db_readonly(|ref mut db| {
                 match db.lookup_variable_unknown_descriptor(contract_id, data_var) {
@@ -83,6 +83,6 @@ impl StacksChainState {
                     Err(e) => Err(clarity_error::Interpreter(e)),
                 }
             })
-            .map_err(Error::ClarityError)
+            .map_err(ChainstateError::ClarityError)
     }
 }

@@ -14,9 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod serialization;
-pub mod signatures;
-
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::{char, str};
@@ -26,18 +23,19 @@ use regex::Regex;
 
 use address::c32;
 use util::hash;
-
-use vm::errors::{
-    CheckErrors, IncomparableError, InterpreterError, InterpreterResult as Result, RuntimeErrorType,
-};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
 use vm::representations::{ClarityName, ContractName, SymbolicExpression, SymbolicExpressionType};
-
 pub use vm::types::signatures::{
     parse_name_type_pairs, AssetIdentifier, BufferLength, FixedFunction, FunctionArg,
     FunctionSignature, FunctionType, ListTypeData, SequenceSubtype, StringSubtype,
     StringUTF8Length, TupleTypeSignature, TypeSignature, BUFF_1, BUFF_20, BUFF_32, BUFF_33,
     BUFF_64, BUFF_65,
 };
+
+use crate::util::errors::{IncomparableError, InterpreterFailureError, RuntimeErrorType};
+
+pub mod serialization;
+pub mod signatures;
 
 pub const MAX_VALUE_SIZE: u32 = 1024 * 1024; // 1MB
 pub const BOUND_VALUE_SERIALIZATION_BYTES: u32 = MAX_VALUE_SIZE * 2;
@@ -697,7 +695,7 @@ impl Value {
         //   be greater than MAX_VALUE_SIZE (they error on such constructions)
         //   so we do not need to perform that check here.
         if (expected_type.get_max_len() as usize) < list_data.len() {
-            return Err(InterpreterError::FailureConstructingListWithType.into());
+            return Err(InterpreterFailureError::FailureConstructingListWithType.into());
         }
 
         {
@@ -705,7 +703,7 @@ impl Value {
 
             for item in &list_data {
                 if !expected_item_type.admits(&item) {
-                    return Err(InterpreterError::FailureConstructingListWithType.into());
+                    return Err(InterpreterFailureError::FailureConstructingListWithType.into());
                 }
             }
         }
@@ -1223,9 +1221,9 @@ impl TupleData {
         for (name, value) in data.drain(..) {
             let expected_type = expected
                 .field_type(&name)
-                .ok_or(InterpreterError::FailureConstructingTupleWithType)?;
+                .ok_or(InterpreterFailureError::FailureConstructingTupleWithType)?;
             if !expected_type.admits(&value) {
-                return Err(InterpreterError::FailureConstructingTupleWithType.into());
+                return Err(InterpreterFailureError::FailureConstructingTupleWithType.into());
             }
             data_map.insert(name, value);
         }
@@ -1271,6 +1269,7 @@ impl fmt::Display for TupleData {
 #[cfg(test)]
 mod test {
     use super::*;
+
     #[test]
     fn test_constructors() {
         assert_eq!(
@@ -1278,7 +1277,7 @@ mod test {
                 vec![Value::Int(5), Value::Int(2)],
                 ListTypeData::new_list(TypeSignature::BoolType, 3).unwrap()
             ),
-            Err(InterpreterError::FailureConstructingListWithType.into())
+            Err(InterpreterFailureError::FailureConstructingListWithType.into())
         );
         assert_eq!(
             ListTypeData::new_list(TypeSignature::IntType, MAX_VALUE_SIZE as u32),

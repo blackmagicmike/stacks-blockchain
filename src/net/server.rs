@@ -31,6 +31,7 @@ use std::sync::mpsc::SendError;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;
 
+use crate::util::errors::NetworkError as net_error;
 use net::atlas::AtlasDB;
 use net::connection::*;
 use net::db::*;
@@ -38,7 +39,6 @@ use net::http::*;
 use net::p2p::PeerMap;
 use net::poll::*;
 use net::rpc::*;
-use net::Error as net_error;
 use net::*;
 
 use chainstate::burn::db::sortdb::SortitionDB;
@@ -754,13 +754,13 @@ mod test {
     use burnchains::BurnchainHeaderHash;
     use burnchains::BurnchainView;
 
+    use crate::util::errors::ChainstateError as chain_error;
     use burnchains::*;
     use chainstate::burn::BlockHeaderHash;
     use chainstate::stacks::db::blocks::test::*;
     use chainstate::stacks::db::BlockStreamData;
     use chainstate::stacks::db::StacksChainState;
     use chainstate::stacks::test::*;
-    use chainstate::stacks::Error as chain_error;
     use chainstate::stacks::*;
     use chainstate::stacks::*;
 

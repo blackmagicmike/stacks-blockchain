@@ -14,12 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use super::{
-    check_argument_count, check_arguments_at_least, no_type, TypeChecker, TypeResult, TypingContext,
-};
 use std::convert::TryFrom;
-use vm::analysis::errors::{CheckError, CheckErrors, CheckResult};
-use vm::errors::{Error as InterpError, RuntimeErrorType};
+
+use crate::util::errors::RuntimeErrorType;
+use util::errors::CheckErrors;
+use vm::costs::cost_functions::ClarityCostFunction;
+use vm::costs::{analysis_typecheck_cost, cost_functions, runtime_cost, CostOverflowingMath};
 use vm::functions::{handle_binding_list, NativeFunctions};
 use vm::types::{
     BlockInfoProperty, FixedFunction, FunctionArg, FunctionSignature, FunctionType, PrincipalData,
@@ -28,8 +28,10 @@ use vm::types::{
 };
 use vm::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 
-use vm::costs::cost_functions::ClarityCostFunction;
-use vm::costs::{analysis_typecheck_cost, cost_functions, runtime_cost, CostOverflowingMath};
+use crate::util::errors::{CheckError, InterpreterError as InterpError};
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least, CheckResult};
+
+use super::{no_type, TypeChecker, TypeResult, TypingContext};
 
 mod assets;
 mod maps;

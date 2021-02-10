@@ -14,48 +14,40 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use core::PEER_VERSION_TESTNET;
-
-use net::asn::ASEntry4;
-use net::db::PeerDB;
-use net::Error as net_error;
-use net::Neighbor;
-use net::NeighborKey;
-use net::PeerAddress;
-
-use net::codec::*;
-use net::*;
-
-use net::connection::ConnectionOptions;
-use net::connection::ReplyHandleP2P;
-
-use net::db::LocalPeer;
-
-use net::p2p::*;
-
-use util::db::DBConn;
-use util::db::DBTx;
-use util::db::Error as db_error;
-
-use util::secp256k1::Secp256k1PublicKey;
-
 use std::cmp;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::mem;
 use std::net::SocketAddr;
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use rand::prelude::*;
+use rand::thread_rng;
 
-use crate::util::secp256k1::PublicKey;
+use crate::util::errors::DBError as db_error;
 use burnchains::Address;
 use burnchains::Burnchain;
 use burnchains::BurnchainView;
-
-use rand::prelude::*;
-use rand::thread_rng;
+use core::PEER_VERSION_TESTNET;
+use net::asn::ASEntry4;
+use net::codec::*;
+use net::connection::ConnectionOptions;
+use net::connection::ReplyHandleP2P;
+use net::db::LocalPeer;
+use net::db::PeerDB;
+use net::p2p::*;
+use net::Neighbor;
+use net::NeighborKey;
+use net::PeerAddress;
+use net::*;
+use util::db::DBConn;
+use util::db::DBTx;
 use util::get_epoch_time_secs;
 use util::hash::*;
 use util::log;
+use util::secp256k1::Secp256k1PublicKey;
+
+use crate::util::errors::{NetworkError as net_error, NetworkError};
+use crate::util::secp256k1::PublicKey;
 
 #[cfg(test)]
 pub const NEIGHBOR_MINIMUM_CONTACT_INTERVAL: u64 = 0;
@@ -2812,7 +2804,7 @@ impl PeerNetwork {
 
             match walk_res {
                 Ok(_) => {}
-                Err(Error::NoSuchNeighbor) => match self.instantiate_walk_from_pingback() {
+                Err(NetworkError::NoSuchNeighbor) => match self.instantiate_walk_from_pingback() {
                     Ok(_) => {}
                     Err(e) => {
                         debug!(
@@ -3067,7 +3059,6 @@ impl PeerNetwork {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use net::asn::*;
     use net::chat::*;
     use net::db::*;
@@ -3075,6 +3066,8 @@ mod test {
     use util::hash::*;
     use util::sleep_ms;
     use util::test::*;
+
+    use super::*;
 
     const TEST_IN_OUT_DEGREES: u64 = 0x1;
 

@@ -15,13 +15,18 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::collections::HashMap;
+
+use address::c32;
+use address::AddressHashMode;
+use chainstate::stacks::StacksPublicKey;
+use chainstate::stacks::{StacksAddress, StacksPrivateKey, C32_ADDRESS_VERSION_TESTNET_SINGLESIG};
 use util::hash::{hex_bytes, to_hex};
 use vm::ast::parse;
 use vm::callables::DefinedFunction;
 use vm::contexts::OwnedEnvironment;
 use vm::costs::LimitedCostTracker;
 use vm::database::MemoryBackingStore;
-use vm::errors::{CheckErrors, Error, RuntimeErrorType, ShortReturnType};
+use vm::errors::CheckErrors;
 use vm::tests::execute;
 use vm::types::signatures::BufferLength;
 use vm::types::{BuffData, QualifiedContractIdentifier, TypeSignature};
@@ -29,10 +34,7 @@ use vm::types::{PrincipalData, ResponseData, SequenceData, SequenceSubtype};
 use vm::{eval, execute as vm_execute};
 use vm::{CallStack, ContractContext, Environment, GlobalContext, LocalContext, Value};
 
-use address::c32;
-use address::AddressHashMode;
-use chainstate::stacks::StacksPublicKey;
-use chainstate::stacks::{StacksAddress, StacksPrivateKey, C32_ADDRESS_VERSION_TESTNET_SINGLESIG};
+use crate::util::errors::{InterpreterError, RuntimeErrorType, ShortReturnType};
 
 #[test]
 fn test_doubly_defined_persisted_vars() {
@@ -277,7 +279,7 @@ fn test_secp256k1_errors() {
         "(principal-of?)",
     ];
 
-    let expectations: &[Error] = &[
+    let expectations: &[InterpreterError] = &[
         CheckErrors::TypeValueError(TypeSignature::SequenceType(SequenceSubtype::BufferType(BufferLength(32))), Value::Sequence(SequenceData::Buffer(BuffData { data: hex_bytes("de5b9eb9e7c5592930eb2e30a01369c36586d872082ed8181ee83d2a0ec20f").unwrap() }))).into(),
         CheckErrors::TypeValueError(TypeSignature::SequenceType(SequenceSubtype::BufferType(BufferLength(65))), Value::Sequence(SequenceData::Buffer(BuffData { data: hex_bytes("8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a130100").unwrap() }))).into(),
         CheckErrors::IncorrectArgumentCount(2, 1).into(),
@@ -561,7 +563,7 @@ fn test_simple_arithmetic_errors() {
         "(is-eq (some 1) (some true))",
     ];
 
-    let expectations: &[Error] = &[
+    let expectations: &[InterpreterError] = &[
         CheckErrors::IncorrectArgumentCount(2, 1).into(),
         CheckErrors::TypeValueError(TypeSignature::IntType, Value::Bool(true)).into(),
         RuntimeErrorType::DivisionByZero.into(),
@@ -608,7 +610,7 @@ fn test_unsigned_arithmetic() {
         "(to-int (pow u2 u127))",
     ];
 
-    let expectations: &[Error] = &[
+    let expectations: &[InterpreterError] = &[
         RuntimeErrorType::ArithmeticUnderflow.into(),
         RuntimeErrorType::ArithmeticUnderflow.into(),
         CheckErrors::UnionTypeValueError(
@@ -646,7 +648,7 @@ fn test_options_errors() {
         "(get field-0 1)",
     ];
 
-    let expectations: &[Error] = &[
+    let expectations: &[InterpreterError] = &[
         CheckErrors::IncorrectArgumentCount(1, 2).into(),
         CheckErrors::ExpectedOptionalValue(Value::Bool(true)).into(),
         CheckErrors::IncorrectArgumentCount(1, 2).into(),
@@ -679,7 +681,7 @@ fn test_stx_ops_errors() {
         "(stx-burn? 4 'SZ2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKQ9H6DPR)",
     ];
 
-    let expectations: &[Error] = &[
+    let expectations: &[InterpreterError] = &[
         CheckErrors::IncorrectArgumentCount(3, 2).into(),
         CheckErrors::BadTransferSTXArguments.into(),
         CheckErrors::BadTransferSTXArguments.into(),
@@ -751,7 +753,7 @@ fn test_option_destructs() {
         "(try! 1)",
     ];
 
-    let expectations: &[Result<Value, Error>] = &[
+    let expectations: &[Result<Value, InterpreterError>] = &[
         Ok(Value::Int(1)),
         Ok(Value::Int(1)),
         Err(CheckErrors::ExpectedResponseValue(Value::some(Value::Int(2)).unwrap()).into()),
@@ -797,7 +799,7 @@ fn test_hash_errors() {
         "(sha512/256 1 2)",
     ];
 
-    let expectations: &[Error] = &[
+    let expectations: &[InterpreterError] = &[
         CheckErrors::IncorrectArgumentCount(1, 2).into(),
         CheckErrors::IncorrectArgumentCount(1, 2).into(),
         CheckErrors::IncorrectArgumentCount(1, 2).into(),
@@ -898,7 +900,7 @@ fn test_bad_lets() {
         "(let ((false 1)) false)",
     ];
 
-    let expectations: &[Error] = &[
+    let expectations: &[InterpreterError] = &[
         CheckErrors::NameAlreadyUsed("tx-sender".to_string()).into(),
         CheckErrors::NameAlreadyUsed("*".to_string()).into(),
         CheckErrors::NameAlreadyUsed("a".to_string()).into(),
@@ -999,11 +1001,11 @@ fn test_asserts_short_circuit() {
         "(begin (asserts! (is-eq 1 1) (err 0)) (asserts! (is-eq 2 1) (err 1)) (ok 2))",
     ];
 
-    let expectations: &[Error] = &[
-        Error::ShortReturn(ShortReturnType::AssertionFailed(
+    let expectations: &[InterpreterError] = &[
+        InterpreterError::ShortReturn(ShortReturnType::AssertionFailed(
             Value::error(Value::Int(0)).unwrap(),
         )),
-        Error::ShortReturn(ShortReturnType::AssertionFailed(
+        InterpreterError::ShortReturn(ShortReturnType::AssertionFailed(
             Value::error(Value::Int(1)).unwrap(),
         )),
     ];

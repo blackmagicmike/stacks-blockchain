@@ -14,36 +14,37 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod definition_sorter;
-pub mod expression_identifier;
-pub mod parser;
-pub mod traits_resolver;
-
-pub mod errors;
-pub mod stack_depth_checker;
-pub mod sugar_expander;
-pub mod types;
+use crate::util::errors::RuntimeErrorType;
+use util::errors::ParseError;
+use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{cost_functions, runtime_cost, CostTracker, LimitedCostTracker};
-use vm::errors::{Error, RuntimeErrorType};
-
 use vm::representations::SymbolicExpression;
 use vm::types::QualifiedContractIdentifier;
 
+use crate::util::errors::InterpreterError;
+
 use self::definition_sorter::DefinitionSorter;
-use self::errors::ParseResult;
 use self::expression_identifier::ExpressionIdentifier;
 use self::stack_depth_checker::StackDepthChecker;
 use self::sugar_expander::SugarExpander;
 use self::traits_resolver::TraitsResolver;
 use self::types::BuildASTPass;
 pub use self::types::ContractAST;
-use vm::costs::cost_functions::ClarityCostFunction;
+
+pub mod definition_sorter;
+pub mod expression_identifier;
+pub mod parser;
+pub mod traits_resolver;
+
+pub mod stack_depth_checker;
+pub mod sugar_expander;
+pub mod types;
 
 /// Legacy function
 pub fn parse(
     contract_identifier: &QualifiedContractIdentifier,
     source_code: &str,
-) -> Result<Vec<SymbolicExpression>, Error> {
+) -> Result<Vec<SymbolicExpression>, InterpreterError> {
     let ast = build_ast(contract_identifier, source_code, &mut ())?;
     Ok(ast.expressions)
 }
@@ -71,14 +72,16 @@ pub fn build_ast<T: CostTracker>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::HashMap;
+
     use chainstate::stacks::index::MarfTrieId;
     use chainstate::stacks::StacksBlockId;
-    use std::collections::HashMap;
     use vm::clarity::ClarityInstance;
     use vm::costs::*;
     use vm::database::*;
     use vm::representations::depth_traverse;
+
+    use super::*;
 
     fn dependency_edge_counting_runtime(iters: usize) -> u64 {
         let mut progn = "(define-private (a0) 1)".to_string();
@@ -158,3 +161,5 @@ mod tests {
         }
     }
 }
+
+pub type ParseResult<T> = Result<T, ParseError>;

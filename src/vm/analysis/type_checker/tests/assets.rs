@@ -15,7 +15,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::convert::TryInto;
-use vm::analysis::errors::CheckErrors;
+use util::errors::CheckErrors;
 use vm::analysis::{mem_type_check, AnalysisDatabase};
 use vm::ast::parse;
 use vm::database::MemoryBackingStore;

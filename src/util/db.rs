@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use chainstate::stacks::index::storage::TrieStorageConnection;
 use std::convert::TryInto;
 use std::error;
 use std::fmt;
@@ -25,12 +24,9 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 
-use util::hash::to_hex;
-use util::sleep_ms;
-
-use chainstate::burn::BlockHeaderHash;
-use vm::types::QualifiedContractIdentifier;
-
+use rand::thread_rng;
+use rand::Rng;
+use rand::RngCore;
 use rusqlite::types::{
     FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, Value as RusqliteValue,
     ValueRef as RusqliteValueRef,
@@ -41,153 +37,64 @@ use rusqlite::Row;
 use rusqlite::Transaction;
 use rusqlite::TransactionBehavior;
 use rusqlite::NO_PARAMS;
+use serde_json::Error as serde_error;
 
+use crate::util::errors::MarfError;
+use chainstate::burn::BlockHeaderHash;
 use chainstate::stacks::index::marf::MarfConnection;
 use chainstate::stacks::index::marf::MarfTransaction;
 use chainstate::stacks::index::marf::MARF;
+use chainstate::stacks::index::storage::TrieStorageConnection;
 use chainstate::stacks::index::storage::TrieStorageTransaction;
-use chainstate::stacks::index::Error as MARFError;
 use chainstate::stacks::index::MARFValue;
 use chainstate::stacks::index::MarfTrieId;
 use chainstate::stacks::index::TrieHash;
+use util::hash::to_hex;
+use util::sleep_ms;
+use vm::types::QualifiedContractIdentifier;
 
-use rand::thread_rng;
-use rand::Rng;
-use rand::RngCore;
-
-use serde_json::Error as serde_error;
+use crate::util::errors::DBError;
 
 pub type DBConn = rusqlite::Connection;
 pub type DBTx<'a> = rusqlite::Transaction<'a>;
 
-#[derive(Debug)]
-pub enum Error {
-    /// Not implemented
-    NotImplemented,
-    /// Database doesn't exist
-    NoDBError,
-    /// Read-only and tried to write
-    ReadOnly,
-    /// Type error -- can't represent the given data in the database
-    TypeError,
-    /// Database is corrupt -- we got data that shouldn't be there, or didn't get data when we
-    /// should have
-    Corruption,
-    /// Serialization error -- can't serialize data
-    SerializationError(serde_error),
-    /// Parse error -- failed to load data we stored directly
-    ParseError,
-    /// Operation would overflow
-    Overflow,
-    /// Data not found
-    NotFoundError,
-    /// Data already exists
-    ExistsError,
-    /// Data corresponds to a non-canonical PoX sortition
-    InvalidPoxSortition,
-    /// Sqlite3 error
-    SqliteError(sqlite_error),
-    /// I/O error
-    IOError(IOError),
-    /// MARF index error
-    IndexError(MARFError),
-    /// Other error
-    Other(String),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::NotImplemented => write!(f, "Not implemented"),
-            Error::NoDBError => write!(f, "Database does not exist"),
-            Error::ReadOnly => write!(f, "Database is opened read-only"),
-            Error::TypeError => write!(f, "Invalid or unrepresentable database type"),
-            Error::Corruption => write!(f, "Database is corrupt"),
-            Error::SerializationError(ref e) => fmt::Display::fmt(e, f),
-            Error::ParseError => write!(f, "Parse error"),
-            Error::Overflow => write!(f, "Numeric overflow"),
-            Error::NotFoundError => write!(f, "Not found"),
-            Error::ExistsError => write!(f, "Already exists"),
-            Error::InvalidPoxSortition => write!(f, "Invalid PoX sortition"),
-            Error::IOError(ref e) => fmt::Display::fmt(e, f),
-            Error::SqliteError(ref e) => fmt::Display::fmt(e, f),
-            Error::IndexError(ref e) => fmt::Display::fmt(e, f),
-            Error::Other(ref s) => fmt::Display::fmt(s, f),
-        }
-    }
-}
-
-impl error::Error for Error {
-    fn cause(&self) -> Option<&dyn error::Error> {
-        match *self {
-            Error::NotImplemented => None,
-            Error::NoDBError => None,
-            Error::ReadOnly => None,
-            Error::TypeError => None,
-            Error::Corruption => None,
-            Error::SerializationError(ref e) => Some(e),
-            Error::ParseError => None,
-            Error::Overflow => None,
-            Error::NotFoundError => None,
-            Error::ExistsError => None,
-            Error::InvalidPoxSortition => None,
-            Error::SqliteError(ref e) => Some(e),
-            Error::IOError(ref e) => Some(e),
-            Error::IndexError(ref e) => Some(e),
-            Error::Other(ref _s) => None,
-        }
-    }
-}
-
-impl From<sqlite_error> for Error {
-    fn from(e: sqlite_error) -> Error {
-        Error::SqliteError(e)
-    }
-}
-
-impl From<MARFError> for Error {
-    fn from(e: MARFError) -> Error {
-        Error::IndexError(e)
-    }
-}
-
 pub trait FromRow<T> {
-    fn from_row<'a>(row: &'a Row) -> Result<T, Error>;
+    fn from_row<'a>(row: &'a Row) -> Result<T, DBError>;
 }
 
 pub trait FromColumn<T> {
-    fn from_column<'a>(row: &'a Row, column_name: &str) -> Result<T, Error>;
+    fn from_column<'a>(row: &'a Row, column_name: &str) -> Result<T, DBError>;
 }
 
 impl FromRow<u64> for u64 {
-    fn from_row<'a>(row: &'a Row) -> Result<u64, Error> {
+    fn from_row<'a>(row: &'a Row) -> Result<u64, DBError> {
         let x: i64 = row.get_unwrap(0);
         if x < 0 {
-            return Err(Error::ParseError);
+            return Err(DBError::ParseError);
         }
         Ok(x as u64)
     }
 }
 
 impl FromColumn<u64> for u64 {
-    fn from_column<'a>(row: &'a Row, column_name: &str) -> Result<u64, Error> {
+    fn from_column<'a>(row: &'a Row, column_name: &str) -> Result<u64, DBError> {
         let x: i64 = row.get_unwrap(column_name);
         if x < 0 {
-            return Err(Error::ParseError);
+            return Err(DBError::ParseError);
         }
         Ok(x as u64)
     }
 }
 
 impl FromRow<i64> for i64 {
-    fn from_row<'a>(row: &'a Row) -> Result<i64, Error> {
+    fn from_row<'a>(row: &'a Row) -> Result<i64, DBError> {
         let x: i64 = row.get_unwrap(0);
         Ok(x)
     }
 }
 
 impl FromColumn<i64> for i64 {
-    fn from_column<'a>(row: &'a Row, column_name: &str) -> Result<i64, Error> {
+    fn from_column<'a>(row: &'a Row, column_name: &str) -> Result<i64, DBError> {
         let x: i64 = row.get_unwrap(column_name);
         Ok(x)
     }
@@ -197,15 +104,15 @@ impl FromColumn<QualifiedContractIdentifier> for QualifiedContractIdentifier {
     fn from_column<'a>(
         row: &'a Row,
         column_name: &str,
-    ) -> Result<QualifiedContractIdentifier, Error> {
+    ) -> Result<QualifiedContractIdentifier, DBError> {
         let value: String = row.get_unwrap(column_name);
-        QualifiedContractIdentifier::parse(&value).map_err(|_| Error::ParseError)
+        QualifiedContractIdentifier::parse(&value).map_err(|_| DBError::ParseError)
     }
 }
 
-pub fn u64_to_sql(x: u64) -> Result<i64, Error> {
+pub fn u64_to_sql(x: u64) -> Result<i64, DBError> {
     if x > (i64::max_value() as u64) {
-        return Err(Error::ParseError);
+        return Err(DBError::ParseError);
     }
     Ok(x as i64)
 }
@@ -229,7 +136,7 @@ macro_rules! impl_byte_array_from_column {
             fn from_column(
                 row: &rusqlite::Row,
                 column_name: &str,
-            ) -> Result<Self, ::util::db::Error> {
+            ) -> Result<Self, ::util::errors::DBError> {
                 Ok(row.get_unwrap::<_, Self>(column_name))
             }
         }
@@ -244,7 +151,7 @@ macro_rules! impl_byte_array_from_column {
 }
 
 /// boilerplate code for querying rows
-pub fn query_rows<T, P>(conn: &Connection, sql_query: &str, sql_args: P) -> Result<Vec<T>, Error>
+pub fn query_rows<T, P>(conn: &Connection, sql_query: &str, sql_args: P) -> Result<Vec<T>, DBError>
 where
     P: IntoIterator,
     P::Item: ToSql,
@@ -258,7 +165,11 @@ where
 
 /// boilerplate code for querying a single row
 ///   if more than 1 row is returned, excess rows are ignored.
-pub fn query_row<T, P>(conn: &Connection, sql_query: &str, sql_args: P) -> Result<Option<T>, Error>
+pub fn query_row<T, P>(
+    conn: &Connection,
+    sql_query: &str,
+    sql_args: P,
+) -> Result<Option<T>, DBError>
 where
     P: IntoIterator,
     P::Item: ToSql,
@@ -267,7 +178,7 @@ where
     let query_result = conn.query_row_and_then(sql_query, sql_args, |row| T::from_row(row));
     match query_result {
         Ok(x) => Ok(Some(x)),
-        Err(Error::SqliteError(sqlite_error::QueryReturnedNoRows)) => Ok(None),
+        Err(DBError::SqliteError(sqlite_error::QueryReturnedNoRows)) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -278,7 +189,7 @@ pub fn query_expect_row<T, P>(
     conn: &Connection,
     sql_query: &str,
     sql_args: P,
-) -> Result<Option<T>, Error>
+) -> Result<Option<T>, DBError>
 where
     P: IntoIterator,
     P::Item: ToSql,
@@ -303,7 +214,7 @@ pub fn query_row_panic<T, P, F>(
     sql_query: &str,
     sql_args: P,
     panic_message: F,
-) -> Result<Option<T>, Error>
+) -> Result<Option<T>, DBError>
 where
     P: IntoIterator,
     P::Item: ToSql,
@@ -328,7 +239,7 @@ pub fn query_row_columns<T, P>(
     sql_query: &String,
     sql_args: P,
     column_name: &str,
-) -> Result<Vec<T>, Error>
+) -> Result<Vec<T>, DBError>
 where
     P: IntoIterator,
     P::Item: ToSql,
@@ -340,7 +251,7 @@ where
 
     // gather
     let mut row_data = vec![];
-    while let Some(row) = rows.next().map_err(|e| Error::SqliteError(e))? {
+    while let Some(row) = rows.next().map_err(|e| DBError::SqliteError(e))? {
         let next_row = T::from_column(&row, column_name)?;
         row_data.push(next_row);
     }
@@ -349,7 +260,7 @@ where
 }
 
 /// Boilerplate for querying a single integer (first and only item of the query must be an int)
-pub fn query_int<P>(conn: &Connection, sql_query: &str, sql_args: P) -> Result<i64, Error>
+pub fn query_int<P>(conn: &Connection, sql_query: &str, sql_args: P) -> Result<i64, DBError>
 where
     P: IntoIterator,
     P::Item: ToSql,
@@ -359,22 +270,22 @@ where
     let mut rows = stmt.query(sql_args)?;
 
     let mut row_data = vec![];
-    while let Some(row) = rows.next().map_err(|e| Error::SqliteError(e))? {
+    while let Some(row) = rows.next().map_err(|e| DBError::SqliteError(e))? {
         if row_data.len() > 0 {
-            return Err(Error::Overflow);
+            return Err(DBError::Overflow);
         }
         let i: i64 = row.get_unwrap(0);
         row_data.push(i);
     }
 
     if row_data.len() == 0 {
-        return Err(Error::NotFoundError);
+        return Err(DBError::NotFoundError);
     }
 
     Ok(row_data[0])
 }
 
-pub fn query_count<P>(conn: &Connection, sql_query: &str, sql_args: P) -> Result<i64, Error>
+pub fn query_count<P>(conn: &Connection, sql_query: &str, sql_args: P) -> Result<i64, DBError>
 where
     P: IntoIterator,
     P::Item: ToSql,
@@ -384,35 +295,41 @@ where
 
 /// Run a PRAGMA statement.  This can't always be done via execute(), because it may return a result (and
 /// rusqlite does not like this).
-pub fn sql_pragma(conn: &Connection, pragma_stmt: &str) -> Result<(), Error> {
+pub fn sql_pragma(conn: &Connection, pragma_stmt: &str) -> Result<(), DBError> {
     conn.query_row_and_then(pragma_stmt, NO_PARAMS, |_row| Ok(()))
 }
 
 /// Set up an on-disk database with a MARF index if they don't exist yet.
 /// Either way, returns (db path, MARF path)
-pub fn db_mkdirs(path_str: &str) -> Result<(String, String), Error> {
+pub fn db_mkdirs(path_str: &str) -> Result<(String, String), DBError> {
     let mut path = PathBuf::from(path_str);
     match fs::metadata(path_str) {
         Ok(md) => {
             if !md.is_dir() {
                 error!("Not a directory: {:?}", path);
-                return Err(Error::ExistsError);
+                return Err(DBError::ExistsError);
             }
         }
         Err(e) => {
             if e.kind() != io::ErrorKind::NotFound {
-                return Err(Error::IOError(e));
+                return Err(DBError::IOError(e));
             }
-            fs::create_dir_all(path_str).map_err(Error::IOError)?;
+            fs::create_dir_all(path_str).map_err(DBError::IOError)?;
         }
     }
 
     path.push("marf");
-    let marf_path = path.to_str().ok_or_else(|| Error::ParseError)?.to_string();
+    let marf_path = path
+        .to_str()
+        .ok_or_else(|| DBError::ParseError)?
+        .to_string();
 
     path.pop();
     path.push("data.db");
-    let data_path = path.to_str().ok_or_else(|| Error::ParseError)?.to_string();
+    let data_path = path
+        .to_str()
+        .ok_or_else(|| DBError::ParseError)?
+        .to_string();
 
     Ok((data_path, marf_path))
 }
@@ -433,7 +350,7 @@ impl<'a, C, T: MarfTrieId> IndexDBConn<'a, C, T> {
         &self,
         block_height: u64,
         tip_block_hash: &T,
-    ) -> Result<Option<T>, Error> {
+    ) -> Result<Option<T>, DBError> {
         get_ancestor_block_hash(self.index, block_height, tip_block_hash)
     }
 
@@ -442,12 +359,12 @@ impl<'a, C, T: MarfTrieId> IndexDBConn<'a, C, T> {
         &self,
         ancestor_block_hash: &T,
         tip_block_hash: &T,
-    ) -> Result<Option<u64>, Error> {
+    ) -> Result<Option<u64>, DBError> {
         get_ancestor_block_height(self.index, ancestor_block_hash, tip_block_hash)
     }
 
     /// Get a value from the fork index
-    pub fn get_indexed(&self, header_hash: &T, key: &str) -> Result<Option<String>, Error> {
+    pub fn get_indexed(&self, header_hash: &T, key: &str) -> Result<Option<String>, DBError> {
         let mut ro_index = self.index.reopen_readonly()?;
         get_indexed(&mut ro_index, header_hash, key)
     }
@@ -506,7 +423,7 @@ pub fn tx_busy_handler(run_count: i32) -> bool {
 /// Begin an immediate-mode transaction, and handle busy errors with exponential backoff.
 /// Handling busy errors when the tx begins is preferable to doing it when the tx commits, since
 /// then we don't have to worry about any extra rollback logic.
-pub fn tx_begin_immediate<'a>(conn: &'a mut Connection) -> Result<DBTx<'a>, Error> {
+pub fn tx_begin_immediate<'a>(conn: &'a mut Connection) -> Result<DBTx<'a>, DBError> {
     conn.busy_handler(Some(tx_busy_handler))?;
     let tx = Transaction::new(conn, TransactionBehavior::Immediate)?;
     Ok(tx)
@@ -517,7 +434,7 @@ pub fn get_ancestor_block_hash<T: MarfTrieId>(
     index: &MARF<T>,
     block_height: u64,
     tip_block_hash: &T,
-) -> Result<Option<T>, Error> {
+) -> Result<Option<T>, DBError> {
     assert!(block_height < u32::max_value() as u64);
     let mut read_only = index.reopen_readonly()?;
     let bh = read_only.get_block_at_height(block_height as u32, tip_block_hash)?;
@@ -529,7 +446,7 @@ pub fn get_ancestor_block_height<T: MarfTrieId>(
     index: &MARF<T>,
     ancestor_block_hash: &T,
     tip_block_hash: &T,
-) -> Result<Option<u64>, Error> {
+) -> Result<Option<u64>, DBError> {
     let mut read_only = index.reopen_readonly()?;
     let height_opt = read_only
         .get_block_height(ancestor_block_hash, tip_block_hash)?
@@ -538,13 +455,13 @@ pub fn get_ancestor_block_height<T: MarfTrieId>(
 }
 
 /// Load some index data
-fn load_indexed(conn: &DBConn, marf_value: &MARFValue) -> Result<Option<String>, Error> {
+fn load_indexed(conn: &DBConn, marf_value: &MARFValue) -> Result<Option<String>, DBError> {
     let mut stmt = conn
         .prepare("SELECT value FROM __fork_storage WHERE value_hash = ?1 LIMIT 2")
-        .map_err(Error::SqliteError)?;
+        .map_err(DBError::SqliteError)?;
     let mut rows = stmt
         .query(&[&marf_value.to_hex() as &dyn ToSql])
-        .map_err(Error::SqliteError)?;
+        .map_err(DBError::SqliteError)?;
     let mut value = None;
 
     while let Some(row) = rows.next().expect("FATAL: Failed to read row from Sqlite") {
@@ -567,7 +484,7 @@ fn get_indexed<T: MarfTrieId, M: MarfConnection<T>>(
     index: &mut M,
     header_hash: &T,
     key: &str,
-) -> Result<Option<String>, Error> {
+) -> Result<Option<String>, DBError> {
     match index.get(header_hash, key) {
         Ok(Some(marf_value)) => {
             let value = load_indexed(index.sqlite_conn(), &marf_value)?
@@ -575,13 +492,13 @@ fn get_indexed<T: MarfTrieId, M: MarfConnection<T>>(
             Ok(Some(value))
         }
         Ok(None) => Ok(None),
-        Err(MARFError::NotFoundError) => Ok(None),
+        Err(MarfError::NotFoundError) => Ok(None),
         Err(e) => {
             error!(
                 "Failed to fetch '{}' off of {}: {:?}",
                 key, &header_hash, &e
             );
-            Err(Error::Corruption)
+            Err(DBError::Corruption)
         }
     }
 }
@@ -618,7 +535,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
         self.index_mut().sqlite_tx_mut()
     }
 
-    pub fn instantiate_index(&mut self) -> Result<(), Error> {
+    pub fn instantiate_index(&mut self) -> Result<(), DBError> {
         self.tx()
             .execute(
                 r#"
@@ -633,7 +550,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
         "#,
                 NO_PARAMS,
             )
-            .map_err(Error::SqliteError)?;
+            .map_err(DBError::SqliteError)?;
         Ok(())
     }
 
@@ -642,13 +559,13 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
         &mut self,
         block_height: u64,
         tip_block_hash: &T,
-    ) -> Result<Option<T>, Error> {
+    ) -> Result<Option<T>, DBError> {
         self.index_mut()
             .get_block_at_height(
                 block_height.try_into().expect("Height > u32::max()"),
                 tip_block_hash,
             )
-            .map_err(Error::from)
+            .map_err(DBError::from)
     }
 
     /// Get the height of an ancestor block, if it is indeed the ancestor.
@@ -656,7 +573,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
         &mut self,
         ancestor_block_hash: &T,
         tip_block_hash: &T,
-    ) -> Result<Option<u64>, Error> {
+    ) -> Result<Option<u64>, DBError> {
         let height_opt = self
             .index_mut()
             .get_block_height(ancestor_block_hash, tip_block_hash)?
@@ -665,7 +582,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
     }
 
     /// Store some data to the index storage.
-    fn store_indexed(&mut self, value: &String) -> Result<MARFValue, Error> {
+    fn store_indexed(&mut self, value: &String) -> Result<MARFValue, DBError> {
         let marf_value = MARFValue::from_value(value);
         self.tx().execute(
             "INSERT OR REPLACE INTO __fork_storage (value_hash, value) VALUES (?1, ?2)",
@@ -675,7 +592,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
     }
 
     /// Get a value from the fork index
-    pub fn get_indexed(&mut self, header_hash: &T, key: &str) -> Result<Option<String>, Error> {
+    pub fn get_indexed(&mut self, header_hash: &T, key: &str) -> Result<Option<String>, DBError> {
         get_indexed(self.index_mut(), header_hash, key)
     }
 
@@ -683,7 +600,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
         &mut self,
         parent_header_hash: &T,
         header_hash: &T,
-    ) -> Result<(), Error> {
+    ) -> Result<(), DBError> {
         match self.block_linkage {
             None => {
                 self.index_mut().begin(parent_header_hash, header_hash)?;
@@ -700,7 +617,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
         &mut self,
         keys: &Vec<String>,
         values: &Vec<String>,
-    ) -> Result<TrieHash, Error> {
+    ) -> Result<TrieHash, DBError> {
         assert_eq!(keys.len(), values.len());
         assert!(self.block_linkage.is_some());
 
@@ -716,7 +633,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
     }
 
     /// Commit the tx
-    pub fn commit(mut self) -> Result<(), Error> {
+    pub fn commit(mut self) -> Result<(), DBError> {
         self.block_linkage = None;
         debug!("Indexed-commit: MARF index");
         let index_tx = self
@@ -728,7 +645,7 @@ impl<'a, C: Clone, T: MarfTrieId> IndexDBTx<'a, C, T> {
     }
 
     /// Get the root hash
-    pub fn get_root_hash_at(&mut self, bhh: &T) -> Result<TrieHash, Error> {
+    pub fn get_root_hash_at(&mut self, bhh: &T) -> Result<TrieHash, DBError> {
         let root_hash = self.index_mut().get_root_hash_at(bhh)?;
         Ok(root_hash)
     }

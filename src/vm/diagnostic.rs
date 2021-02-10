@@ -15,18 +15,16 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::fmt;
+
 use vm::representations::Span;
+
+use crate::util::errors::DiagnosableError;
 
 /// In a near future, we can go further in our static analysis and provide different levels
 /// of diagnostics, such as warnings, hints, best practices, etc.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Level {
     Error,
-}
-
-pub trait DiagnosableError {
-    fn message(&self) -> String;
-    fn suggestion(&self) -> Option<String>;
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

@@ -14,29 +14,29 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub mod analysis_db;
-pub mod arithmetic_checker;
-pub mod contract_interface_builder;
-pub mod errors;
-pub mod read_only_checker;
-pub mod trait_checker;
-pub mod type_checker;
-pub mod types;
-
-pub use self::types::{AnalysisPass, ContractAnalysis};
+use util::errors::CheckErrors;
 use vm::costs::LimitedCostTracker;
 use vm::database::STORE_CONTRACT_SRC_INTERFACE;
 use vm::representations::SymbolicExpression;
 use vm::types::{QualifiedContractIdentifier, TypeSignature};
 
-pub use self::analysis_db::AnalysisDatabase;
-pub use self::errors::{CheckError, CheckErrors, CheckResult};
+pub use crate::util::errors::CheckError;
 
+pub use self::analysis_db::AnalysisDatabase;
 use self::arithmetic_checker::ArithmeticOnlyChecker;
 use self::contract_interface_builder::build_contract_interface;
 use self::read_only_checker::ReadOnlyChecker;
 use self::trait_checker::TraitChecker;
 use self::type_checker::TypeChecker;
+pub use self::types::{AnalysisPass, ContractAnalysis};
+
+pub mod analysis_db;
+pub mod arithmetic_checker;
+pub mod contract_interface_builder;
+pub mod read_only_checker;
+pub mod trait_checker;
+pub mod type_checker;
+pub mod types;
 
 pub fn mem_type_check(snippet: &str) -> CheckResult<(Option<TypeSignature>, ContractAnalysis)> {
     use vm::ast::parse;
@@ -116,3 +116,21 @@ pub fn run_analysis(
 
 #[cfg(test)]
 mod tests;
+
+pub type CheckResult<T> = Result<T, CheckError>;
+
+pub fn check_argument_count<T>(expected: usize, args: &[T]) -> Result<(), CheckErrors> {
+    if args.len() != expected {
+        Err(CheckErrors::IncorrectArgumentCount(expected, args.len()))
+    } else {
+        Ok(())
+    }
+}
+
+pub fn check_arguments_at_least<T>(expected: usize, args: &[T]) -> Result<(), CheckErrors> {
+    if args.len() < expected {
+        Err(CheckErrors::RequiresAtLeastArguments(expected, args.len()))
+    } else {
+        Ok(())
+    }
+}

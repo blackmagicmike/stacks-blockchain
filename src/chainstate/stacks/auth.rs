@@ -18,10 +18,11 @@ use std::io;
 use std::io::prelude::*;
 use std::io::{Read, Write};
 
+use crate::util::errors::ChainstateError;
+use crate::util::errors::NetworkError as net_error;
 use address::public_keys_to_address_hash;
 use address::AddressHashMode;
 use burnchains::Txid;
-use chainstate::stacks::Error;
 use chainstate::stacks::MultisigHashMode;
 use chainstate::stacks::MultisigSpendingCondition;
 use chainstate::stacks::SinglesigHashMode;
@@ -39,7 +40,6 @@ use chainstate::stacks::{
     C32_ADDRESS_VERSION_MAINNET_MULTISIG, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
     C32_ADDRESS_VERSION_TESTNET_MULTISIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
-use net::Error as net_error;
 use net::MAX_MESSAGE_LEN;
 use net::STACKS_PUBLIC_KEY_ENCODED_SIZE;
 use util::hash::to_hex;
@@ -942,13 +942,13 @@ impl TransactionAuth {
     pub fn set_sponsor(
         &mut self,
         sponsor_spending_cond: TransactionSpendingCondition,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         match *self {
             TransactionAuth::Sponsored(_, ref mut ssc) => {
                 *ssc = sponsor_spending_cond;
                 Ok(())
             }
-            _ => Err(Error::IncompatibleSpendingConditionError),
+            _ => Err(ChainstateError::IncompatibleSpendingConditionError),
         }
     }
 
@@ -1017,9 +1017,11 @@ impl TransactionAuth {
         }
     }
 
-    pub fn set_sponsor_nonce(&mut self, n: u64) -> Result<(), Error> {
+    pub fn set_sponsor_nonce(&mut self, n: u64) -> Result<(), ChainstateError> {
         match *self {
-            TransactionAuth::Standard(_) => Err(Error::IncompatibleSpendingConditionError),
+            TransactionAuth::Standard(_) => {
+                Err(ChainstateError::IncompatibleSpendingConditionError)
+            }
             TransactionAuth::Sponsored(_, ref mut s) => {
                 s.set_nonce(n);
                 Ok(())

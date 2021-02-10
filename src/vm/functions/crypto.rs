@@ -14,15 +14,16 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use address::AddressHashMode;
+use chainstate::stacks::{StacksAddress, C32_ADDRESS_VERSION_TESTNET_SINGLESIG};
 use util::hash;
+use util::secp256k1::{secp256k1_recover, secp256k1_verify, Secp256k1PublicKey};
 use vm::callables::{CallableType, NativeHandle};
+use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{
     constants as cost_constants, cost_functions, runtime_cost, CostTracker, MemoryConsumer,
 };
-use vm::errors::{
-    check_argument_count, check_arguments_at_least, CheckErrors, Error,
-    InterpreterResult as Result, RuntimeErrorType, ShortReturnType,
-};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
 use vm::representations::SymbolicExpressionType::{Atom, List};
 use vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 use vm::types::{
@@ -31,11 +32,8 @@ use vm::types::{
 };
 use vm::{eval, Environment, LocalContext};
 
-use util::secp256k1::{secp256k1_recover, secp256k1_verify, Secp256k1PublicKey};
-
-use address::AddressHashMode;
-use chainstate::stacks::{StacksAddress, C32_ADDRESS_VERSION_TESTNET_SINGLESIG};
-use vm::costs::cost_functions::ClarityCostFunction;
+use crate::util::errors::{InterpreterError, RuntimeErrorType, ShortReturnType};
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least};
 
 macro_rules! native_hash_func {
     ($name:ident, $module:ty) => {

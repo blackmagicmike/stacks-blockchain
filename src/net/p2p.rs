@@ -16,10 +16,10 @@
 
 use std::mem;
 
+use crate::util::errors::NetworkError as net_error;
 use net::asn::ASEntry4;
 use net::atlas::AtlasDB;
 use net::db::PeerDB;
-use net::Error as net_error;
 use net::Neighbor;
 use net::NeighborKey;
 use net::PeerAddress;
@@ -53,8 +53,8 @@ use net::relay::*;
 
 use net::atlas::{AttachmentInstance, AttachmentsDownloader};
 
+use crate::util::errors::DBError as db_error;
 use util::db::DBConn;
-use util::db::Error as db_error;
 
 use util::hash::to_hex;
 use util::secp256k1::Secp256k1PublicKey;

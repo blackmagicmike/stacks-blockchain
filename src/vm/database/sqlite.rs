@@ -21,12 +21,12 @@ use rusqlite::{
 };
 
 use chainstate::stacks::StacksBlockId;
-
 use util::db::{sql_pragma, tx_busy_handler};
-
 use vm::contracts::Contract;
-use vm::errors::{
-    Error, IncomparableError, InterpreterError, InterpreterResult as Result, RuntimeErrorType,
+use vm::errors::InterpreterResult as Result;
+
+use crate::util::errors::{
+    IncomparableError, InterpreterError, InterpreterFailureError, RuntimeErrorType,
 };
 
 const SQL_FAIL_MESSAGE: &str = "PANIC: SQL Failure in Smart Contract VM.";
@@ -160,14 +160,14 @@ impl SqliteConnection {
 impl SqliteConnection {
     pub fn initialize_conn(conn: &Connection) -> Result<()> {
         conn.query_row("PRAGMA journal_mode = WAL;", NO_PARAMS, |_row| Ok(()))
-            .map_err(|x| InterpreterError::SqliteError(IncomparableError { err: x }))?;
+            .map_err(|x| InterpreterFailureError::SqliteError(IncomparableError { err: x }))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS data_table
                       (key TEXT PRIMARY KEY, value TEXT)",
             NO_PARAMS,
         )
-        .map_err(|x| InterpreterError::SqliteError(IncomparableError { err: x }))?;
+        .map_err(|x| InterpreterFailureError::SqliteError(IncomparableError { err: x }))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS metadata_table
@@ -175,7 +175,7 @@ impl SqliteConnection {
                        UNIQUE (key, blockhash))",
             NO_PARAMS,
         )
-        .map_err(|x| InterpreterError::SqliteError(IncomparableError { err: x }))?;
+        .map_err(|x| InterpreterFailureError::SqliteError(IncomparableError { err: x }))?;
 
         Self::check_schema(conn)?;
 
@@ -195,19 +195,19 @@ impl SqliteConnection {
         let sql = "SELECT sql FROM sqlite_master WHERE name=?";
         let _: String = conn
             .query_row(sql, &["data_table"], |row| row.get(0))
-            .map_err(|x| InterpreterError::SqliteError(IncomparableError { err: x }))?;
+            .map_err(|x| InterpreterFailureError::SqliteError(IncomparableError { err: x }))?;
         let _: String = conn
             .query_row(sql, &["metadata_table"], |row| row.get(0))
-            .map_err(|x| InterpreterError::SqliteError(IncomparableError { err: x }))?;
+            .map_err(|x| InterpreterFailureError::SqliteError(IncomparableError { err: x }))?;
         Ok(())
     }
 
     pub fn inner_open(filename: &str) -> Result<Connection> {
         let conn = Connection::open(filename)
-            .map_err(|x| InterpreterError::SqliteError(IncomparableError { err: x }))?;
+            .map_err(|x| InterpreterFailureError::SqliteError(IncomparableError { err: x }))?;
 
         conn.busy_handler(Some(tx_busy_handler))
-            .map_err(|x| InterpreterError::SqliteError(IncomparableError { err: x }))?;
+            .map_err(|x| InterpreterFailureError::SqliteError(IncomparableError { err: x }))?;
 
         Ok(conn)
     }

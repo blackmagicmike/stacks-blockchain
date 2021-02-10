@@ -14,22 +14,31 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::{cmp, fmt};
 // TypeSignatures
 use std::collections::{BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::hash::{Hash, Hasher};
-use std::{cmp, fmt};
 
 use address::c32;
 use util::hash;
+use vm::costs::cost_functions::ClarityCostFunction;
+use vm::costs::CostTracker;
 use vm::costs::{cost_functions, runtime_cost, CostOverflowingMath};
-use vm::errors::{CheckErrors, Error as VMError, IncomparableError, RuntimeErrorType};
+use vm::errors::CheckErrors;
 use vm::representations::{
     ClarityName, ContractName, SymbolicExpression, SymbolicExpressionType, TraitDefinition,
 };
 use vm::types::{
     CharType, QualifiedContractIdentifier, SequenceData, SequencedValue, StandardPrincipalData,
     TraitIdentifier, Value, MAX_TYPE_DEPTH, MAX_VALUE_SIZE, WRAPPER_VALUE_SIZE,
+};
+
+use crate::util::errors::{IncomparableError, InterpreterError as VMError, RuntimeErrorType};
+
+use self::TypeSignature::{
+    BoolType, IntType, NoType, OptionalType, PrincipalType, ResponseType, SequenceType,
+    TraitReferenceType, TupleType, UIntType,
 };
 
 type Result<R> = std::result::Result<R, CheckErrors>;
@@ -119,11 +128,6 @@ pub enum StringSubtype {
     ASCII(BufferLength),
     UTF8(StringUTF8Length),
 }
-
-use self::TypeSignature::{
-    BoolType, IntType, NoType, OptionalType, PrincipalType, ResponseType, SequenceType,
-    TraitReferenceType, TupleType, UIntType,
-};
 
 pub const BUFF_64: TypeSignature = SequenceType(SequenceSubtype::BufferType(BufferLength(64)));
 pub const BUFF_65: TypeSignature = SequenceType(SequenceSubtype::BufferType(BufferLength(65)));
@@ -1216,9 +1220,6 @@ impl TupleTypeSignature {
     }
 }
 
-use vm::costs::cost_functions::ClarityCostFunction;
-use vm::costs::CostTracker;
-
 pub fn parse_name_type_pairs<A: CostTracker>(
     name_type_pairs: &[SymbolicExpression],
     accounting: &mut A,
@@ -1340,9 +1341,10 @@ impl fmt::Display for FunctionArg {
 
 #[cfg(test)]
 mod test {
+    use vm::execute;
+
     use super::CheckErrors::*;
     use super::*;
-    use vm::execute;
 
     fn fail_parse(val: &str) -> CheckErrors {
         use vm::ast::parse;

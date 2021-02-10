@@ -16,6 +16,10 @@
 
 use std::convert::TryFrom;
 use std::convert::TryInto;
+
+use vm::analysis::type_checker::{no_type, TypeChecker, TypeResult, TypingContext};
+use vm::costs::cost_functions::ClarityCostFunction;
+use vm::costs::{analysis_typecheck_cost, cost_functions, runtime_cost};
 use vm::functions::NativeFunctions;
 use vm::representations::{SymbolicExpression, SymbolicExpressionType};
 pub use vm::types::signatures::{BufferLength, ListTypeData, StringUTF8Length, BUFF_1};
@@ -23,14 +27,10 @@ use vm::types::{FunctionType, TypeSignature};
 use vm::types::{SequenceSubtype::*, StringSubtype::*};
 use vm::types::{Value, MAX_VALUE_SIZE};
 
-use super::{SimpleNativeFunction, TypedNativeFunction};
-use vm::analysis::type_checker::{
-    check_argument_count, check_arguments_at_least, no_type, CheckErrors, CheckResult, TypeChecker,
-    TypeResult, TypingContext,
-};
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least, CheckResult};
 
-use vm::costs::cost_functions::ClarityCostFunction;
-use vm::costs::{analysis_typecheck_cost, cost_functions, runtime_cost};
+use super::{SimpleNativeFunction, TypedNativeFunction};
+use util::errors::CheckErrors;
 
 fn get_simple_native_or_user_define(
     function_name: &str,

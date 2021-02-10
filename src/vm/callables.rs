@@ -20,19 +20,20 @@ use std::fmt;
 use std::iter::FromIterator;
 
 use chainstate::stacks::events::StacksTransactionEvent;
-
-use vm::costs::{cost_functions, runtime_cost};
-
-use vm::analysis::errors::CheckErrors;
+use util::errors::CheckErrors;
 use vm::contexts::ContractContext;
 use vm::costs::cost_functions::ClarityCostFunction;
-use vm::errors::{check_argument_count, Error, InterpreterResult as Result};
+use vm::costs::{cost_functions, runtime_cost};
+use vm::errors::InterpreterResult as Result;
 use vm::representations::{ClarityName, SymbolicExpression};
 use vm::types::Value::UInt;
 use vm::types::{
     FunctionType, PrincipalData, QualifiedContractIdentifier, TraitIdentifier, TypeSignature,
 };
 use vm::{eval, Environment, LocalContext, Value};
+
+use crate::util::errors::InterpreterError;
+use crate::vm::analysis::check_argument_count;
 
 pub enum CallableType {
     UserFunction(DefinedFunction),
@@ -181,7 +182,7 @@ impl DefinedFunction {
         match result {
             Ok(r) => Ok(r),
             Err(e) => match e {
-                Error::ShortReturn(v) => Ok(v.into()),
+                InterpreterError::ShortReturn(v) => Ok(v.into()),
                 _ => Err(e),
             },
         }

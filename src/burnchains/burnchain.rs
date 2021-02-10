@@ -68,9 +68,9 @@ use chainstate::stacks::index::TrieHash;
 use chainstate::stacks::StacksAddress;
 use chainstate::stacks::StacksPublicKey;
 
+use crate::util::errors::DBError as db_error;
 use util::db::DBConn;
 use util::db::DBTx;
-use util::db::Error as db_error;
 use util::get_epoch_time_ms;
 use util::get_epoch_time_secs;
 use util::hash::to_hex;
@@ -1490,7 +1490,7 @@ pub mod tests {
     use rand::rngs::ThreadRng;
     use rand::thread_rng;
 
-    use util::db::Error as db_error;
+    use crate::util::errors::DBError as db_error;
     use util::hash::to_hex;
     use util::hash::Hash160;
     use util::secp256k1::Secp256k1PrivateKey;

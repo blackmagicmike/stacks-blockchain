@@ -40,17 +40,15 @@ use blockstack_lib::chainstate::stacks::{
     C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
 use blockstack_lib::core::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
-use blockstack_lib::net::Error as NetError;
+use blockstack_lib::util::errors::{
+    InterpreterError as ClarityError, NetworkError as NetError, RuntimeErrorType,
+};
 use blockstack_lib::util::messages::StacksMessageCodec;
 use blockstack_lib::util::{
     hash::hex_bytes, hash::to_hex, log, retry::LogReader, strings::StacksString,
 };
 use blockstack_lib::vm;
-use blockstack_lib::vm::{
-    errors::{Error as ClarityError, RuntimeErrorType},
-    types::PrincipalData,
-    ClarityName, ContractName, Value,
-};
+use blockstack_lib::vm::{types::PrincipalData, ClarityName, ContractName, Value};
 
 const USAGE: &str = "blockstack-cli (options) [method] [args...]
 

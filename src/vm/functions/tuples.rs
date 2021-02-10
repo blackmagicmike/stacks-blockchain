@@ -15,13 +15,13 @@
 
 use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{cost_functions, runtime_cost};
-use vm::errors::{
-    check_argument_count, check_arguments_at_least, CheckErrors, InterpreterResult as Result,
-};
+use vm::errors::{CheckErrors, InterpreterResult as Result};
 use vm::representations::SymbolicExpressionType::List;
 use vm::representations::{SymbolicExpression, SymbolicExpressionType};
 use vm::types::{TupleData, TypeSignature, Value};
 use vm::{eval, Environment, LocalContext};
+
+use crate::vm::analysis::{check_argument_count, check_arguments_at_least};
 
 pub fn tuple_cons(
     args: &[SymbolicExpression],

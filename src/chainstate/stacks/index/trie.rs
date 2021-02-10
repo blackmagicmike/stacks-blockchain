@@ -38,7 +38,7 @@ use chainstate::stacks::index::marf::MARF;
 
 use chainstate::stacks::index::{MarfTrieId, TrieHash, TrieHasher, TRIEHASH_ENCODED_SIZE};
 
-use chainstate::stacks::index::Error;
+use crate::util::errors::MarfError;
 
 use sha2::Digest;
 use util::hash::to_hex;
@@ -53,7 +53,7 @@ pub struct Trie {}
 fn get_nodetype_hash<T: MarfTrieId>(
     storage: &mut TrieStorageConnection<T>,
     node: &TrieNodeType,
-) -> Result<TrieHash, Error> {
+) -> Result<TrieHash, MarfError> {
     let mut hasher = TrieHasher::new();
 
     node.write_consensus_bytes(storage, &mut hasher)
@@ -76,7 +76,7 @@ impl Trie {
     /// node ID mismatch (i.e. CorruptionError), then try to read it as a non-backpointer.
     pub fn read_root<T: MarfTrieId>(
         storage: &mut TrieStorageConnection<T>,
-    ) -> Result<(TrieNodeType, TrieHash), Error> {
+    ) -> Result<(TrieNodeType, TrieHash), MarfError> {
         let ptr = TriePtr::new(
             set_backptr(TrieNodeID::Node256 as u8),
             0,
@@ -84,7 +84,7 @@ impl Trie {
         );
         let res = storage.read_nodetype(&ptr);
         match res {
-            Err(Error::CorruptionError(_)) => {
+            Err(MarfError::CorruptionError(_)) => {
                 let non_backptr_ptr = storage.root_trieptr();
                 storage.read_nodetype(&non_backptr_ptr)
             }
@@ -102,7 +102,7 @@ impl Trie {
         storage: &mut TrieStorageConnection<T>,
         node: &TrieNodeType,
         cursor: &mut TrieCursor<T>,
-    ) -> Result<Option<(TriePtr, TrieNodeType, TrieHash)>, Error> {
+    ) -> Result<Option<(TriePtr, TrieNodeType, TrieHash)>, MarfError> {
         match cursor.walk(node, &storage.get_cur_block()) {
             Ok(ptr_opt) => {
                 match ptr_opt {
@@ -118,7 +118,7 @@ impl Trie {
                     }
                 }
             }
-            Err(e) => Err(Error::CursorError(e)),
+            Err(e) => Err(MarfError::CursorError(e)),
         }
     }
 
@@ -136,12 +136,12 @@ impl Trie {
         storage: &mut TrieStorageConnection<T>,
         ptr: &TriePtr,
         cursor: &mut TrieCursor<T>,
-    ) -> Result<(TrieNodeType, TrieHash, TriePtr), Error> {
+    ) -> Result<(TrieNodeType, TrieHash, TriePtr), MarfError> {
         if !is_backptr(ptr.id()) {
             // child is in this block
             if ptr.id() == (TrieNodeID::Empty as u8) {
                 // shouldn't happen
-                return Err(Error::CorruptionError("ptr is empty".to_string()));
+                return Err(MarfError::CorruptionError("ptr is empty".to_string()));
             }
             let (node, node_hash) = storage.read_nodetype(ptr)?;
             return Ok((node, node_hash, ptr.clone()));
@@ -165,7 +165,7 @@ impl Trie {
     pub fn get_children_hashes<T: MarfTrieId>(
         storage: &mut TrieStorageConnection<T>,
         node: &TrieNodeType,
-    ) -> Result<Vec<TrieHash>, Error> {
+    ) -> Result<Vec<TrieHash>, MarfError> {
         let mut buffer = Vec::with_capacity(node.ptrs().len() * TRIEHASH_ENCODED_SIZE);
         storage.write_children_hashes(node, &mut buffer)?;
         assert_eq!(buffer.len() % TRIEHASH_ENCODED_SIZE, 0);
@@ -186,10 +186,10 @@ impl Trie {
         storage: &mut TrieStorageConnection<T>,
         cursor: &mut TrieCursor<T>,
         value: &mut TrieLeaf,
-    ) -> Result<TriePtr, Error> {
+    ) -> Result<TriePtr, MarfError> {
         let (cur_leaf, _) = storage.read_nodetype(&cursor.ptr())?;
         if !cur_leaf.is_leaf() {
-            return Err(Error::CorruptionError(format!(
+            return Err(MarfError::CorruptionError(format!(
                 "Not a leaf: {:?}",
                 &cursor.ptr()
             )));
@@ -213,7 +213,7 @@ impl Trie {
         storage: &mut TrieStorageConnection<T>,
         cursor: &mut TrieCursor<T>,
         value: &mut TrieLeaf,
-    ) -> Result<TriePtr, Error> {
+    ) -> Result<TriePtr, MarfError> {
         assert!(cursor.chr().is_some());
 
         let ptr = storage.last_ptr()?;
@@ -252,7 +252,7 @@ impl Trie {
         cursor: &mut TrieCursor<T>,
         cur_leaf_data: &mut TrieLeaf,
         new_leaf_data: &mut TrieLeaf,
-    ) -> Result<TriePtr, Error> {
+    ) -> Result<TriePtr, MarfError> {
         // can only work if we're not at the end of the path, and the current node has a path
         assert!(!cursor.eop());
         assert!(cur_leaf_data.path.len() > 0);
@@ -386,7 +386,7 @@ impl Trie {
         cursor: &mut TrieCursor<T>,
         leaf: &mut TrieLeaf,
         node: &mut TrieNodeType,
-    ) -> Result<Option<TriePtr>, Error> {
+    ) -> Result<Option<TriePtr>, MarfError> {
         // can only do this if we're at the end of the node's path
         if !cursor.eonp(node) {
             // nope
@@ -426,7 +426,7 @@ impl Trie {
         cursor: &mut TrieCursor<T>,
         leaf: &mut TrieLeaf,
         node: &mut TrieNodeType,
-    ) -> Result<TriePtr, Error> {
+    ) -> Result<TriePtr, MarfError> {
         // can only do this if we're at the end of the node's path
         assert!(cursor.eonp(node));
 
@@ -499,7 +499,7 @@ impl Trie {
         cursor: &mut TrieCursor<T>,
         leaf: &mut TrieLeaf,
         node: &mut TrieNodeType,
-    ) -> Result<TriePtr, Error> {
+    ) -> Result<TriePtr, MarfError> {
         assert!(!cursor.eop());
         assert!(!cursor.eonp(node));
         assert!(cursor.chr().is_some());
@@ -583,7 +583,7 @@ impl Trie {
         storage: &mut TrieStorageConnection<T>,
         cursor: &mut TrieCursor<T>,
         value: &mut TrieLeaf,
-    ) -> Result<TriePtr, Error> {
+    ) -> Result<TriePtr, MarfError> {
         let mut node = match cursor.node() {
             Some(n) => n,
             None => panic!("Cursor is uninitialized"),
@@ -622,7 +622,7 @@ impl Trie {
     /// This method _does not_ restore the previously open block on failure, the caller will do that.
     fn inner_get_trie_ancestor_hashes_bytes<T: MarfTrieId>(
         storage: &mut TrieStorageConnection<T>,
-    ) -> Result<Vec<TrieHash>, Error> {
+    ) -> Result<Vec<TrieHash>, MarfError> {
         let cur_block_header = storage.get_cur_block();
         // definitely enough space for the foreseeable future
         //    ancestor depth _cannot_ exceed 32 -- 2^32 > max size of u32
@@ -635,14 +635,14 @@ impl Trie {
         let cur_block_height =
             MARF::get_block_height_miner_tip(storage, &cur_block_header, &cur_block_header)
                 .map_err(|e| match e {
-                    Error::NotFoundError => Error::CorruptionError(format!(
+                    MarfError::NotFoundError => MarfError::CorruptionError(format!(
                         "Could not obtain block height for block {}",
                         &cur_block_header
                     )),
                     x => x,
                 })?
                 .ok_or_else(|| {
-                    Error::CorruptionError(format!(
+                    MarfError::CorruptionError(format!(
                         "Could not obtain block height for block {}",
                         &cur_block_header
                     ))
@@ -655,7 +655,7 @@ impl Trie {
                 &cur_block_header,
             )?
             .ok_or_else(|| {
-                Error::CorruptionError(format!(
+                MarfError::CorruptionError(format!(
                     "Could not obtain block hash at block height {}",
                     cur_block_height - (1u32 << log_depth)
                 ))
@@ -686,7 +686,7 @@ impl Trie {
     /// s must point to the block that contains the trie's root.
     pub fn get_trie_ancestor_hashes_bytes<T: MarfTrieId>(
         storage: &mut TrieStorageConnection<T>,
-    ) -> Result<Vec<TrieHash>, Error> {
+    ) -> Result<Vec<TrieHash>, MarfError> {
         let (cur_block_header, cur_block_id) = storage.get_cur_block_and_id();
         if let Some(cached_ancestor_hashes_bytes) =
             storage.check_cached_ancestor_hashes_bytes(&cur_block_header)
@@ -709,7 +709,7 @@ impl Trie {
     pub fn get_trie_root_ancestor_hashes_bytes<T: MarfTrieId>(
         storage: &mut TrieStorageConnection<T>,
         children_root_hash: &TrieHash,
-    ) -> Result<Vec<TrieHash>, Error> {
+    ) -> Result<Vec<TrieHash>, MarfError> {
         trace!(
             "Calculate Trie hash from root node digest {:?}",
             children_root_hash
@@ -726,7 +726,7 @@ impl Trie {
     pub fn get_trie_root_hash<T: MarfTrieId>(
         storage: &mut TrieStorageConnection<T>,
         children_root_hash: &TrieHash,
-    ) -> Result<TrieHash, Error> {
+    ) -> Result<TrieHash, MarfError> {
         let hashes = Trie::get_trie_root_ancestor_hashes_bytes(storage, children_root_hash)?;
         if hashes.len() == 1 {
             Ok(hashes[0])
@@ -743,7 +743,7 @@ impl Trie {
         storage: &mut TrieStorageConnection<T>,
         cursor: &TrieCursor<T>,
         update_skiplist: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         assert!(cursor.node_ptrs.len() > 0);
 
         let mut ptrs = cursor.node_ptrs.clone();
@@ -756,13 +756,13 @@ impl Trie {
             trace!("Fix up root node so it mixes in its ancestor hashes");
             let (node, _cur_hash) = storage.read_nodetype(&child_ptr)?;
             if !node.is_node256() {
-                return Err(Error::CorruptionError(
+                return Err(MarfError::CorruptionError(
                     "Only ptr was not a node256".to_string(),
                 ));
             }
 
             if child_ptr != storage.root_trieptr() {
-                return Err(Error::CorruptionError(
+                return Err(MarfError::CorruptionError(
                     "Only ptr is not the root".to_string(),
                 ));
             }
@@ -884,14 +884,14 @@ impl Trie {
     pub fn update_root_hash<T: MarfTrieId>(
         storage: &mut TrieStorageConnection<T>,
         cursor: &TrieCursor<T>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         Trie::recalculate_root_hash(storage, cursor, true)
     }
 
     pub fn update_root_node_hash<T: MarfTrieId>(
         storage: &mut TrieStorageConnection<T>,
         cursor: &TrieCursor<T>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         Trie::recalculate_root_hash(storage, cursor, false)
     }
 }
@@ -935,7 +935,7 @@ mod test {
                 },
                 Err(e) => {
                     match e {
-                        Error::CursorError(_) => {
+                        MarfError::CursorError(_) => {
                             // don't care about backptrs in this suite of tests
                             return (node_ptr, node, node_hash);
                         }

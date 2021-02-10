@@ -20,6 +20,8 @@ use std::convert::From;
 use std::fs;
 use std::mem;
 
+use crate::util::errors::ChainstateError;
+use crate::util::errors::NetworkError as net_error;
 use burnchains::BurnchainHeaderHash;
 use chainstate::burn::db::sortdb::{SortitionDB, SortitionDBConn};
 use chainstate::burn::operations::*;
@@ -31,11 +33,9 @@ use chainstate::stacks::db::{
 };
 use chainstate::stacks::events::StacksTransactionReceipt;
 use chainstate::stacks::index::TrieHash;
-use chainstate::stacks::Error;
 use chainstate::stacks::*;
 use core::mempool::*;
 use core::*;
-use net::Error as net_error;
 use util::hash::MerkleTree;
 use util::hash::Sha512Trunc256Sum;
 use util::secp256k1::{MessageSignature, Secp256k1PrivateKey};
@@ -97,12 +97,12 @@ impl<'a> StacksMicroblockBuilder<'a> {
         anchor_block_consensus_hash: ConsensusHash,
         chainstate: &'a mut StacksChainState,
         burn_dbconn: &'a dyn BurnStateDB,
-    ) -> Result<StacksMicroblockBuilder<'a>, Error> {
+    ) -> Result<StacksMicroblockBuilder<'a>, ChainstateError> {
         let runtime = if let Some(unconfirmed_state) = chainstate.unconfirmed_state.as_ref() {
             MicroblockMinerRuntime::from(unconfirmed_state)
         } else {
             warn!("No unconfirmed state instantiated; cannot mine microblocks");
-            return Err(Error::NoSuchBlockError);
+            return Err(ChainstateError::NoSuchBlockError);
         };
 
         let (header_reader, _) = chainstate.reopen()?;
@@ -116,7 +116,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
                 "No such block: {}/{}",
                 &anchor_block_consensus_hash, &anchor_block
             );
-            Error::NoSuchBlockError
+            ChainstateError::NoSuchBlockError
         })?
         .block_height;
 
@@ -152,12 +152,12 @@ impl<'a> StacksMicroblockBuilder<'a> {
     pub fn resume_unconfirmed(
         chainstate: &'a mut StacksChainState,
         burn_dbconn: &'a dyn BurnStateDB,
-    ) -> Result<StacksMicroblockBuilder<'a>, Error> {
+    ) -> Result<StacksMicroblockBuilder<'a>, ChainstateError> {
         let runtime = if let Some(unconfirmed_state) = chainstate.unconfirmed_state.as_ref() {
             MicroblockMinerRuntime::from(unconfirmed_state)
         } else {
             warn!("No unconfirmed state instantiated; cannot mine microblocks");
-            return Err(Error::NoSuchBlockError);
+            return Err(ChainstateError::NoSuchBlockError);
         };
 
         let (header_reader, _) = chainstate.reopen()?;
@@ -173,7 +173,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
                             "No such confirmed block {}",
                             &unconfirmed.confirmed_chain_tip
                         );
-                        Error::NoSuchBlockError
+                        ChainstateError::NoSuchBlockError
                     })?;
                 (
                     header_info.consensus_hash,
@@ -183,7 +183,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
             } else {
                 // unconfirmed state needs to be initialized
                 debug!("Unconfirmed chainstate not initialized");
-                return Err(Error::NoSuchBlockError)?;
+                return Err(ChainstateError::NoSuchBlockError)?;
             };
 
         let mut clarity_tx = chainstate.begin_unconfirmed(burn_dbconn).ok_or_else(|| {
@@ -191,7 +191,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
                 "Failed to begin-unconfirmed on {}/{}",
                 &anchored_consensus_hash, &anchored_block_hash
             );
-            Error::NoSuchBlockError
+            ChainstateError::NoSuchBlockError
         })?;
 
         clarity_tx.reset_cost(runtime.consumed_execution.clone());
@@ -211,11 +211,11 @@ impl<'a> StacksMicroblockBuilder<'a> {
         &mut self,
         txs: Vec<StacksTransaction>,
         miner_key: &Secp256k1PrivateKey,
-    ) -> Result<StacksMicroblock, Error> {
+    ) -> Result<StacksMicroblock, ChainstateError> {
         let miner_pubkey_hash =
             Hash160::from_node_public_key(&StacksPublicKey::from_private(miner_key));
         if txs.len() == 0 {
-            return Err(Error::NoTransactionsToMine);
+            return Err(ChainstateError::NoTransactionsToMine);
         }
 
         let txid_vecs = txs.iter().map(|tx| tx.txid().as_bytes().to_vec()).collect();
@@ -225,7 +225,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
         let mut next_microblock_header =
             if let Some(ref prev_microblock) = self.runtime.prev_microblock_header {
                 StacksMicroblockHeader::from_parent_unsigned(prev_microblock, &tx_merkle_root)
-                    .ok_or(Error::MicroblockStreamTooLongError)?
+                    .ok_or(ChainstateError::MicroblockStreamTooLongError)?
             } else {
                 // .prev_block is the hash of the parent anchored block
                 StacksMicroblockHeader::first_unsigned(&self.anchor_block, &tx_merkle_root)
@@ -260,7 +260,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
         tx_len: u64,
         considered: &mut HashSet<Txid>,
         bytes_so_far: u64,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         if tx.anchor_mode != TransactionAnchorMode::OffChainOnly
             && tx.anchor_mode != TransactionAnchorMode::Any
         {
@@ -272,13 +272,13 @@ impl<'a> StacksMicroblockBuilder<'a> {
             considered.insert(tx.txid());
         }
         if bytes_so_far + tx_len >= MAX_EPOCH_SIZE.into() {
-            return Err(Error::BlockTooBigError);
+            return Err(ChainstateError::BlockTooBigError);
         }
         let quiet = !cfg!(test);
         match StacksChainState::process_transaction(clarity_tx, &tx, quiet) {
             Ok(_) => return Ok(true),
             Err(e) => match e {
-                Error::CostOverflowError(cost_before, cost_after, total_budget) => {
+                ChainstateError::CostOverflowError(cost_before, cost_after, total_budget) => {
                     warn!(
                         "Transaction {} reached block cost {}; budget was {}",
                         tx.txid(),
@@ -299,7 +299,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
         &mut self,
         txs_and_lens: Vec<(StacksTransaction, u64)>,
         miner_key: &Secp256k1PrivateKey,
-    ) -> Result<StacksMicroblock, Error> {
+    ) -> Result<StacksMicroblock, ChainstateError> {
         let mut txs_included = vec![];
 
         let mut clarity_tx = self
@@ -343,7 +343,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
         self.runtime.considered.replace(considered);
 
         match result {
-            Err(Error::BlockTooBigError) => {
+            Err(ChainstateError::BlockTooBigError) => {
                 info!("Block budget reached with microblocks");
             }
             Err(e) => {
@@ -360,7 +360,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
         &mut self,
         mem_pool: &MemPoolDB,
         miner_key: &Secp256k1PrivateKey,
-    ) -> Result<StacksMicroblock, Error> {
+    ) -> Result<StacksMicroblock, ChainstateError> {
         let mut txs_included = vec![];
 
         let mut clarity_tx = self
@@ -420,7 +420,7 @@ impl<'a> StacksMicroblockBuilder<'a> {
 
         match result {
             Ok(_) => {}
-            Err(Error::BlockTooBigError) => {
+            Err(ChainstateError::BlockTooBigError) => {
                 info!("Block budget reached with microblocks");
             }
             Err(e) => {
@@ -616,7 +616,7 @@ impl StacksBlockBuilder {
         &mut self,
         clarity_tx: &mut ClarityTx,
         tx: &StacksTransaction,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         let tx_len = tx.tx_len();
         self.try_mine_tx_with_len(clarity_tx, tx, tx_len)
     }
@@ -628,9 +628,9 @@ impl StacksBlockBuilder {
         clarity_tx: &mut ClarityTx,
         tx: &StacksTransaction,
         tx_len: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         if self.bytes_so_far + tx_len >= MAX_EPOCH_SIZE.into() {
-            return Err(Error::BlockTooBigError);
+            return Err(ChainstateError::BlockTooBigError);
         }
 
         let quiet = !cfg!(test);
@@ -639,7 +639,7 @@ impl StacksBlockBuilder {
             if tx.anchor_mode != TransactionAnchorMode::OnChainOnly
                 && tx.anchor_mode != TransactionAnchorMode::Any
             {
-                return Err(Error::InvalidStacksTransaction(
+                return Err(ChainstateError::InvalidStacksTransaction(
                     "Invalid transaction anchor mode for anchored data".to_string(),
                     false,
                 ));
@@ -647,7 +647,7 @@ impl StacksBlockBuilder {
 
             let (fee, _receipt) = StacksChainState::process_transaction(clarity_tx, tx, quiet)
                 .map_err(|e| match e {
-                    Error::CostOverflowError(cost_before, cost_after, total_budget) => {
+                    ChainstateError::CostOverflowError(cost_before, cost_after, total_budget) => {
                         warn!(
                             "Transaction {} reached block cost {}; budget was {}",
                             tx.txid(),
@@ -655,7 +655,7 @@ impl StacksBlockBuilder {
                             &total_budget
                         );
                         clarity_tx.reset_cost(cost_before);
-                        Error::BlockTooBigError
+                        ChainstateError::BlockTooBigError
                     }
                     _ => e,
                 })?;
@@ -674,7 +674,7 @@ impl StacksBlockBuilder {
             if tx.anchor_mode != TransactionAnchorMode::OffChainOnly
                 && tx.anchor_mode != TransactionAnchorMode::Any
             {
-                return Err(Error::InvalidStacksTransaction(
+                return Err(ChainstateError::InvalidStacksTransaction(
                     "Invalid transaction anchor mode for streamed data".to_string(),
                     false,
                 ));
@@ -682,7 +682,7 @@ impl StacksBlockBuilder {
 
             let (fee, _receipt) = StacksChainState::process_transaction(clarity_tx, tx, quiet)
                 .map_err(|e| match e {
-                    Error::CostOverflowError(cost_before, cost_after, total_budget) => {
+                    ChainstateError::CostOverflowError(cost_before, cost_after, total_budget) => {
                         warn!(
                             "Transaction {} reached block cost {}; budget was {}",
                             tx.txid(),
@@ -690,7 +690,7 @@ impl StacksBlockBuilder {
                             &total_budget
                         );
                         clarity_tx.reset_cost(cost_before);
-                        Error::BlockTooBigError
+                        ChainstateError::BlockTooBigError
                     }
                     _ => e,
                 })?;
@@ -717,10 +717,10 @@ impl StacksBlockBuilder {
         &mut self,
         clarity_tx: &mut ClarityTx<'a>,
         tx: &StacksTransaction,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         let mut tx_bytes = vec![];
         tx.consensus_serialize(&mut tx_bytes)
-            .map_err(Error::NetError)?;
+            .map_err(ChainstateError::NetError)?;
         let tx_len = tx_bytes.len() as u64;
 
         if self.bytes_so_far + tx_len >= MAX_EPOCH_SIZE.into() {
@@ -846,7 +846,7 @@ impl StacksBlockBuilder {
     }
 
     /// Cut the next microblock.
-    pub fn mine_next_microblock<'a>(&mut self) -> Result<StacksMicroblock, Error> {
+    pub fn mine_next_microblock<'a>(&mut self) -> Result<StacksMicroblock, ChainstateError> {
         let txid_vecs = self
             .micro_txs
             .iter()
@@ -867,7 +867,7 @@ impl StacksBlockBuilder {
                     &self.prev_microblock_header,
                     &tx_merkle_root,
                 )
-                .ok_or(Error::MicroblockStreamTooLongError)?
+                .ok_or(ChainstateError::MicroblockStreamTooLongError)?
             };
 
         test_debug!("Sign with {}", self.miner_privkey.to_hex());
@@ -902,7 +902,7 @@ impl StacksBlockBuilder {
         parent_consensus_hash: &ConsensusHash,
         parent_header_hash: &BlockHeaderHash,
         parent_index_hash: &StacksBlockId,
-    ) -> Result<Vec<StacksMicroblock>, Error> {
+    ) -> Result<Vec<StacksMicroblock>, ChainstateError> {
         if let Some(microblock_parent_hash) = self.parent_microblock_hash.as_ref() {
             // load up a microblock fork
             let microblocks = StacksChainState::load_microblock_stream_fork(
@@ -911,7 +911,7 @@ impl StacksBlockBuilder {
                 &parent_header_hash,
                 &microblock_parent_hash,
             )?
-            .ok_or(Error::NoSuchBlockError)?;
+            .ok_or(ChainstateError::NoSuchBlockError)?;
 
             Ok(microblocks)
         } else {
@@ -938,7 +938,7 @@ impl StacksBlockBuilder {
         &mut self,
         chainstate: &'a mut StacksChainState,
         burn_dbconn: &'a SortitionDBConn,
-    ) -> Result<ClarityTx<'a>, Error> {
+    ) -> Result<ClarityTx<'a>, ChainstateError> {
         let mainnet = chainstate.config().mainnet;
 
         // find matured miner rewards, so we can grant them within the Clarity DB tx.
@@ -1048,7 +1048,10 @@ impl StacksBlockBuilder {
                     );
                     warn!("{}", &msg);
 
-                    return Err(Error::InvalidStacksMicroblock(msg, mblock_header_hash));
+                    return Err(ChainstateError::InvalidStacksMicroblock(
+                        msg,
+                        mblock_header_hash,
+                    ));
                 }
             };
             let num_mblocks = parent_microblocks.len();
@@ -1100,7 +1103,7 @@ impl StacksBlockBuilder {
         chainstate_handle: &StacksChainState,
         burn_dbconn: &SortitionDBConn,
         mut txs: Vec<StacksTransaction>,
-    ) -> Result<(StacksBlock, u64, ExecutionCost), Error> {
+    ) -> Result<(StacksBlock, u64, ExecutionCost), ChainstateError> {
         debug!("Build anchored block from {} transactions", txs.len());
         let (mut chainstate, _) =
             chainstate_handle.reopen_limited(chainstate_handle.block_limit.clone())?; // used for processing a block up to the given limit
@@ -1110,12 +1113,12 @@ impl StacksBlockBuilder {
                 Ok(_) => {
                     debug!("Included {}", &tx.txid());
                 }
-                Err(Error::BlockTooBigError) => {
+                Err(ChainstateError::BlockTooBigError) => {
                     // done mining -- our execution budget is exceeded.
                     // Make the block from the transactions we did manage to get
                     debug!("Block budget exceeded on tx {}", &tx.txid());
                 }
-                Err(Error::InvalidStacksTransaction(_emsg, true)) => {
+                Err(ChainstateError::InvalidStacksTransaction(_emsg, true)) => {
                     // if we have an invalid transaction that was quietly ignored, don't warn here either
                     test_debug!(
                         "Failed to apply tx {}: InvalidStacksTransaction '{:?}'",
@@ -1143,7 +1146,7 @@ impl StacksBlockBuilder {
         proof: VRFProof,
         total_burn: u64,
         pubkey_hash: Hash160,
-    ) -> Result<StacksBlockBuilder, Error> {
+    ) -> Result<StacksBlockBuilder, ChainstateError> {
         let builder = if stacks_parent_header.consensus_hash == FIRST_BURNCHAIN_CONSENSUS_HASH {
             let (first_block_hash_hex, first_block_height, first_block_ts) = if mainnet {
                 (
@@ -1196,7 +1199,7 @@ impl StacksBlockBuilder {
         proof: VRFProof,
         total_burn: u64,
         pubkey_hash: Hash160,
-    ) -> Result<StacksBlockBuilder, Error> {
+    ) -> Result<StacksBlockBuilder, ChainstateError> {
         let builder = if stacks_parent_header.consensus_hash == FIRST_BURNCHAIN_CONSENSUS_HASH {
             let first_block_hash =
                 BurnchainHeaderHash::from_hex(BITCOIN_REGTEST_FIRST_BLOCK_HASH).unwrap();
@@ -1242,10 +1245,10 @@ impl StacksBlockBuilder {
         pubkey_hash: Hash160,
         coinbase_tx: &StacksTransaction,
         execution_budget: ExecutionCost,
-    ) -> Result<(StacksBlock, ExecutionCost, u64), Error> {
+    ) -> Result<(StacksBlock, ExecutionCost, u64), ChainstateError> {
         if let TransactionPayload::Coinbase(..) = coinbase_tx.payload {
         } else {
-            return Err(Error::MemPoolError(
+            return Err(ChainstateError::MemPoolError(
                 "Not a coinbase transaction".to_string(),
             ));
         }
@@ -1313,12 +1316,12 @@ impl StacksBlockBuilder {
                         txinfo.metadata.len,
                     ) {
                         Ok(_) => {}
-                        Err(Error::BlockTooBigError) => {
+                        Err(ChainstateError::BlockTooBigError) => {
                             // done mining -- our execution budget is exceeded.
                             // Make the block from the transactions we did manage to get
                             debug!("Block budget exceeded on tx {}", &txinfo.tx.txid());
                         }
-                        Err(Error::InvalidStacksTransaction(_, true)) => {
+                        Err(ChainstateError::InvalidStacksTransaction(_, true)) => {
                             // if we have an invalid transaction that was quietly ignored, don't warn here either
                             continue;
                         }

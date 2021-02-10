@@ -14,13 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use net::Error as net_error;
+use crate::util::errors::NetworkError as net_error;
 use net::Neighbor;
 use net::NeighborKey;
 use net::PeerAddress;
 
+use crate::util::errors::DBError as db_error;
 use util::db::DBConn;
-use util::db::Error as db_error;
 
 use std::collections::HashMap;
 use std::collections::HashSet;

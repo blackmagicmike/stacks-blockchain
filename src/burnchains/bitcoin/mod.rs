@@ -43,7 +43,7 @@ use deps::bitcoin::network::serialize::Error as btc_serialize_error;
 
 use util::HexError as btc_hex_error;
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 
 pub type PeerMessage = deps::bitcoin::network::message::NetworkMessage;
 

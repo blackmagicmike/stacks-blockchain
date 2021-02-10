@@ -21,16 +21,16 @@ use rusqlite::Row;
 
 use burnchains::Address;
 
+use crate::util::errors::ChainstateError;
 use chainstate::stacks::db::blocks::*;
 use chainstate::stacks::db::*;
-use chainstate::stacks::Error;
 use chainstate::stacks::*;
 use vm::clarity::{ClarityConnection, ClarityTransactionConnection};
 use vm::database::marf::*;
 use vm::database::*;
 use vm::types::*;
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 use util::db::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,14 +158,14 @@ impl StacksChainState {
         contract_id: &QualifiedContractIdentifier,
         token_name: &str,
         principal: &PrincipalData,
-    ) -> Result<u128, Error> {
+    ) -> Result<u128, ChainstateError> {
         clarity_tx
             .connection()
             .with_clarity_db_readonly(|ref mut db| {
                 let ft_balance = db.get_ft_balance(contract_id, token_name, principal, None)?;
                 Ok(ft_balance)
             })
-            .map_err(Error::ClarityError)
+            .map_err(ChainstateError::ClarityError)
     }
 
     pub fn get_account_nft<'a>(
@@ -173,7 +173,7 @@ impl StacksChainState {
         contract_id: &QualifiedContractIdentifier,
         token_name: &str,
         token_value: &Value,
-    ) -> Result<PrincipalData, Error> {
+    ) -> Result<PrincipalData, ChainstateError> {
         clarity_tx
             .connection()
             .with_clarity_db_readonly(|ref mut db| {
@@ -182,7 +182,7 @@ impl StacksChainState {
                     db.get_nft_owner(contract_id, token_name, token_value, &expected_asset_type)?;
                 Ok(nft_owner)
             })
-            .map_err(Error::ClarityError)
+            .map_err(ChainstateError::ClarityError)
     }
 
     /// Called each time a transaction is invoked from this principal, to e.g.
@@ -282,16 +282,16 @@ impl StacksChainState {
         principal: &PrincipalData,
         lock_amount: u128,
         unlock_burn_height: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         assert!(unlock_burn_height > 0);
         assert!(lock_amount > 0);
 
         let mut snapshot = db.get_stx_balance_snapshot(principal);
         if snapshot.has_locked_tokens() {
-            return Err(Error::PoxAlreadyLocked);
+            return Err(ChainstateError::PoxAlreadyLocked);
         }
         if !snapshot.can_transfer(lock_amount) {
-            return Err(Error::PoxInsufficientBalance);
+            return Err(ChainstateError::PoxInsufficientBalance);
         }
         snapshot.lock_tokens(lock_amount, unlock_burn_height);
 
@@ -313,7 +313,7 @@ impl StacksChainState {
         tx: &mut StacksDBTx<'a>,
         block_reward: &MinerPaymentSchedule,
         user_burns: &Vec<StagingUserBurnSupport>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         assert!(block_reward.burnchain_commit_burn < i64::max_value() as u64);
         assert!(block_reward.burnchain_sortition_burn < i64::max_value() as u64);
         assert!(block_reward.stacks_block_height < i64::max_value() as u64);
@@ -361,7 +361,7 @@ impl StacksChainState {
                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
             args,
         )
-        .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+        .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         for user_support in user_burns.iter() {
             assert!(user_support.burn_amount < i64::max_value() as u64);
@@ -404,7 +404,7 @@ impl StacksChainState {
                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
                 args,
             )
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
         }
 
         Ok(())
@@ -415,12 +415,12 @@ impl StacksChainState {
     pub fn get_poison_microblock_report<T: ClarityConnection>(
         clarity_tx: &mut T,
         height: u64,
-    ) -> Result<Option<(StacksAddress, u16)>, Error> {
+    ) -> Result<Option<(StacksAddress, u16)>, ChainstateError> {
         let principal_seq_opt = clarity_tx
             .with_clarity_db_readonly(|ref mut db| {
                 Ok(db.get_microblock_poison_report(height as u32))
             })
-            .map_err(Error::ClarityError)?;
+            .map_err(ChainstateError::ClarityError)?;
 
         Ok(principal_seq_opt.map(|(principal, seq)| (principal.into(), seq)))
     }
@@ -429,11 +429,12 @@ impl StacksChainState {
     pub fn get_scheduled_block_rewards_at_block<'a>(
         tx: &mut StacksDBTx<'a>,
         index_block_hash: &StacksBlockId,
-    ) -> Result<Vec<MinerPaymentSchedule>, Error> {
+    ) -> Result<Vec<MinerPaymentSchedule>, ChainstateError> {
         let qry =
             "SELECT * FROM payments WHERE index_block_hash = ?1 ORDER BY vtxindex ASC".to_string();
         let args: &[&dyn ToSql] = &[index_block_hash];
-        let rows = query_rows::<MinerPaymentSchedule, _>(tx, &qry, args).map_err(Error::DBError)?;
+        let rows = query_rows::<MinerPaymentSchedule, _>(tx, &qry, args)
+            .map_err(ChainstateError::DBError)?;
         test_debug!("{} rewards in {}", rows.len(), index_block_hash);
         Ok(rows)
     }
@@ -443,7 +444,7 @@ impl StacksChainState {
         tx: &mut StacksDBTx<'a>,
         tip: &StacksHeaderInfo,
         block_height: u64,
-    ) -> Result<Vec<MinerPaymentSchedule>, Error> {
+    ) -> Result<Vec<MinerPaymentSchedule>, ChainstateError> {
         let ancestor_info = match StacksChainState::get_tip_ancestor(tx, tip, block_height)? {
             Some(info) => info,
             None => {
@@ -457,7 +458,8 @@ impl StacksChainState {
             &ancestor_info.anchored_header.block_hash(),
             &ancestor_info.consensus_hash,
         ];
-        let rows = query_rows::<MinerPaymentSchedule, _>(tx, &qry, args).map_err(Error::DBError)?;
+        let rows = query_rows::<MinerPaymentSchedule, _>(tx, &qry, args)
+            .map_err(ChainstateError::DBError)?;
         test_debug!(
             "{} rewards in {}/{}",
             rows.len(),
@@ -471,7 +473,7 @@ impl StacksChainState {
     pub fn get_scheduled_block_rewards<'a>(
         tx: &mut StacksDBTx<'a>,
         tip: &StacksHeaderInfo,
-    ) -> Result<Vec<MinerPaymentSchedule>, Error> {
+    ) -> Result<Vec<MinerPaymentSchedule>, ChainstateError> {
         if tip.block_height < MINER_REWARD_MATURITY {
             return Ok(vec![]);
         }
@@ -485,7 +487,7 @@ impl StacksChainState {
         conn: &DBConn,
         consensus_hash: &ConsensusHash,
         stacks_block_hash: &BlockHeaderHash,
-    ) -> Result<Option<MinerPaymentSchedule>, Error> {
+    ) -> Result<Option<MinerPaymentSchedule>, ChainstateError> {
         let qry =
             "SELECT * FROM payments WHERE consensus_hash = ?1 AND block_hash = ?2 AND miner = 1"
                 .to_string();
@@ -493,8 +495,8 @@ impl StacksChainState {
             consensus_hash as &dyn ToSql,
             stacks_block_hash as &dyn ToSql,
         ];
-        let mut rows =
-            query_rows::<MinerPaymentSchedule, _>(conn, &qry, &args).map_err(Error::DBError)?;
+        let mut rows = query_rows::<MinerPaymentSchedule, _>(conn, &qry, &args)
+            .map_err(ChainstateError::DBError)?;
         let len = rows.len();
         match len {
             0 => {
@@ -667,7 +669,10 @@ impl StacksChainState {
         tip: &StacksHeaderInfo,
         mut latest_matured_miners: Vec<MinerPaymentSchedule>,
         parent_miner: MinerPaymentSchedule,
-    ) -> Result<Option<(MinerReward, Vec<MinerReward>, MinerReward, MinerRewardInfo)>, Error> {
+    ) -> Result<
+        Option<(MinerReward, Vec<MinerReward>, MinerReward, MinerRewardInfo)>,
+        ChainstateError,
+    > {
         let mainnet = clarity_tx.config.mainnet;
         if tip.block_height <= MINER_REWARD_MATURITY {
             // no mature rewards exist
@@ -743,11 +748,11 @@ impl StacksChainState {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::util::errors::ChainstateError;
     use burnchains::*;
     use chainstate::burn::*;
     use chainstate::stacks::db::test::*;
     use chainstate::stacks::index::*;
-    use chainstate::stacks::Error;
     use chainstate::stacks::*;
     use util::hash::*;
     use vm::costs::ExecutionCost;

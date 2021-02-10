@@ -50,17 +50,13 @@ use chainstate::burn::db::sortdb::PoxId;
 use chainstate::burn::BlockHeaderHash;
 use chainstate::burn::ConsensusHash;
 use chainstate::stacks::db::blocks::MemPoolRejection;
-use chainstate::stacks::index::Error as marf_error;
-use chainstate::stacks::Error as chainstate_error;
 use chainstate::stacks::{
-    Error as chain_error, StacksAddress, StacksBlock, StacksBlockId, StacksMicroblock,
-    StacksPublicKey, StacksTransaction,
+    StacksAddress, StacksBlock, StacksBlockId, StacksMicroblock, StacksPublicKey, StacksTransaction,
 };
 use core::mempool::*;
 use core::POX_REWARD_CYCLE_LENGTH;
 use net::atlas::{Attachment, AttachmentInstance};
 use util::db::DBConn;
-use util::db::Error as db_error;
 use util::get_epoch_time_secs;
 use util::hash::Hash160;
 use util::hash::DOUBLE_SHA256_ENCODED_SIZE;
@@ -71,12 +67,14 @@ use util::secp256k1::MessageSignature;
 use util::secp256k1::Secp256k1PublicKey;
 use util::secp256k1::MESSAGE_SIGNATURE_ENCODED_SIZE;
 use util::strings::UrlString;
-use vm::clarity::Error as clarity_error;
 use vm::{
     analysis::contract_interface_builder::ContractInterface, types::PrincipalData, ClarityName,
     ContractName, Value,
 };
 
+use crate::util::errors::NetworkError;
+use crate::util::errors::{ChainstateError, ClarityError as clarity_error};
+use crate::util::errors::{ClientError, DBError};
 use crate::util::hash::Sha256Sum;
 use crate::util::messages::StacksMessageCodec;
 use crate::util::secp256k1::StacksPublicKeyBuffer;
@@ -101,302 +99,6 @@ pub mod prune;
 pub mod relay;
 pub mod rpc;
 pub mod server;
-
-#[derive(Debug)]
-pub enum Error {
-    /// Failed to encode
-    SerializeError(String),
-    /// Failed to read
-    ReadError(io::Error),
-    /// Failed to decode
-    DeserializeError(String),
-    /// Failed to write
-    WriteError(io::Error),
-    /// Underflow -- not enough bytes to form the message
-    UnderflowError(String),
-    /// Overflow -- message too big
-    OverflowError(String),
-    /// Wrong protocol family
-    WrongProtocolFamily,
-    /// Array is too big
-    ArrayTooLong,
-    /// Receive timed out
-    RecvTimeout,
-    /// Error signing a message
-    SigningError(String),
-    /// Error verifying a message
-    VerifyingError(String),
-    /// Read stream is drained.  Try again
-    TemporarilyDrained,
-    /// Read stream has reached EOF (socket closed, end-of-file reached, etc.)
-    PermanentlyDrained,
-    /// Failed to read from the FS
-    FilesystemError,
-    /// Database error
-    DBError(db_error),
-    /// Socket mutex was poisoned
-    SocketMutexPoisoned,
-    /// Socket not instantiated
-    SocketNotConnectedToPeer,
-    /// Not connected to peer
-    ConnectionBroken,
-    /// Connection could not be (re-)established
-    ConnectionError,
-    /// Too many outgoing messages
-    OutboxOverflow,
-    /// Too many incoming messages
-    InboxOverflow,
-    /// Send error
-    SendError(String),
-    /// Recv error
-    RecvError(String),
-    /// Invalid message
-    InvalidMessage,
-    /// Invalid network handle
-    InvalidHandle,
-    /// Network handle is full
-    FullHandle,
-    /// Invalid handshake
-    InvalidHandshake,
-    /// Stale neighbor
-    StaleNeighbor,
-    /// No such neighbor
-    NoSuchNeighbor,
-    /// Failed to bind
-    BindError,
-    /// Failed to poll
-    PollError,
-    /// Failed to accept
-    AcceptError,
-    /// Failed to register socket with poller
-    RegisterError,
-    /// Failed to query socket metadata
-    SocketError,
-    /// server is not bound to a socket
-    NotConnected,
-    /// Remote peer is not connected
-    PeerNotConnected,
-    /// Too many peers
-    TooManyPeers,
-    /// Peer already connected
-    AlreadyConnected(usize, NeighborKey),
-    /// Message already in progress
-    InProgress,
-    /// Peer is denied
-    Denied,
-    /// Data URL is not known
-    NoDataUrl,
-    /// Peer is transmitting too fast
-    PeerThrottled,
-    /// Error resolving a DNS name
-    LookupError(String),
-    /// MARF error, percolated up from chainstate
-    MARFError(marf_error),
-    /// Clarity VM error, percolated up from chainstate
-    ClarityError(clarity_error),
-    /// Catch-all for chainstate errors that don't map cleanly into network errors
-    ChainstateError(String),
-    /// Catch-all for errors that a client should receive more information about
-    ClientError(ClientError),
-    /// Coordinator hung up
-    CoordinatorClosed,
-    /// view of state is stale (e.g. from the sortition db)
-    StaleView,
-    /// Tried to connect to myself
-    ConnectionCycle,
-    /// Requested data not found
-    NotFoundError,
-}
-
-/// Enum for passing data for ClientErrors
-#[derive(Debug, Clone, PartialEq)]
-pub enum ClientError {
-    /// Catch-all
-    Message(String),
-    /// 404
-    NotFound(String),
-}
-
-impl error::Error for ClientError {
-    fn cause(&self) -> Option<&dyn error::Error> {
-        None
-    }
-}
-
-impl fmt::Display for ClientError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ClientError::Message(s) => write!(f, "{}", s),
-            ClientError::NotFound(s) => write!(f, "HTTP path not matched: {}", s),
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::SerializeError(ref s) => fmt::Display::fmt(s, f),
-            Error::DeserializeError(ref s) => fmt::Display::fmt(s, f),
-            Error::ReadError(ref io) => fmt::Display::fmt(io, f),
-            Error::WriteError(ref io) => fmt::Display::fmt(io, f),
-            Error::UnderflowError(ref s) => fmt::Display::fmt(s, f),
-            Error::OverflowError(ref s) => fmt::Display::fmt(s, f),
-            Error::WrongProtocolFamily => write!(f, "Improper use of protocol family"),
-            Error::ArrayTooLong => write!(f, "Array too long"),
-            Error::RecvTimeout => write!(f, "Packet receive timeout"),
-            Error::SigningError(ref s) => fmt::Display::fmt(s, f),
-            Error::VerifyingError(ref s) => fmt::Display::fmt(s, f),
-            Error::TemporarilyDrained => {
-                write!(f, "Temporarily out of bytes to read; try again later")
-            }
-            Error::PermanentlyDrained => write!(f, "Out of bytes to read"),
-            Error::FilesystemError => write!(f, "Disk I/O error"),
-            Error::DBError(ref e) => fmt::Display::fmt(e, f),
-            Error::SocketMutexPoisoned => write!(f, "socket mutex was poisoned"),
-            Error::SocketNotConnectedToPeer => write!(f, "not connected to peer"),
-            Error::ConnectionBroken => write!(f, "connection to peer node is broken"),
-            Error::ConnectionError => write!(f, "connection to peer could not be (re-)established"),
-            Error::OutboxOverflow => write!(f, "too many outgoing messages queued"),
-            Error::InboxOverflow => write!(f, "too many messages pending"),
-            Error::SendError(ref s) => fmt::Display::fmt(s, f),
-            Error::RecvError(ref s) => fmt::Display::fmt(s, f),
-            Error::InvalidMessage => write!(f, "invalid message (malformed or bad signature)"),
-            Error::InvalidHandle => write!(f, "invalid network handle"),
-            Error::FullHandle => write!(f, "network handle is full and needs to be drained"),
-            Error::InvalidHandshake => write!(f, "invalid handshake from remote peer"),
-            Error::StaleNeighbor => write!(f, "neighbor is too far behind the chain tip"),
-            Error::NoSuchNeighbor => write!(f, "no such neighbor"),
-            Error::BindError => write!(f, "Failed to bind to the given address"),
-            Error::PollError => write!(f, "Failed to poll"),
-            Error::AcceptError => write!(f, "Failed to accept connection"),
-            Error::RegisterError => write!(f, "Failed to register socket with poller"),
-            Error::SocketError => write!(f, "Socket error"),
-            Error::NotConnected => write!(f, "Not connected to peer network"),
-            Error::PeerNotConnected => write!(f, "Remote peer is not connected to us"),
-            Error::TooManyPeers => write!(f, "Too many peer connections open"),
-            Error::AlreadyConnected(ref _id, ref _nk) => write!(f, "Peer already connected"),
-            Error::InProgress => write!(f, "Message already in progress"),
-            Error::Denied => write!(f, "Peer is denied"),
-            Error::NoDataUrl => write!(f, "No data URL available"),
-            Error::PeerThrottled => write!(f, "Peer is transmitting too fast"),
-            Error::LookupError(ref s) => fmt::Display::fmt(s, f),
-            Error::ChainstateError(ref s) => fmt::Display::fmt(s, f),
-            Error::ClarityError(ref e) => fmt::Display::fmt(e, f),
-            Error::MARFError(ref e) => fmt::Display::fmt(e, f),
-            Error::ClientError(ref e) => write!(f, "ClientError: {}", e),
-            Error::CoordinatorClosed => write!(f, "Coordinator hung up"),
-            Error::StaleView => write!(f, "State view is stale"),
-            Error::ConnectionCycle => write!(f, "Tried to connect to myself"),
-            Error::NotFoundError => write!(f, "Requested data not found"),
-        }
-    }
-}
-
-impl error::Error for Error {
-    fn cause(&self) -> Option<&dyn error::Error> {
-        match *self {
-            Error::SerializeError(ref _s) => None,
-            Error::ReadError(ref io) => Some(io),
-            Error::DeserializeError(ref _s) => None,
-            Error::WriteError(ref io) => Some(io),
-            Error::UnderflowError(ref _s) => None,
-            Error::OverflowError(ref _s) => None,
-            Error::WrongProtocolFamily => None,
-            Error::ArrayTooLong => None,
-            Error::RecvTimeout => None,
-            Error::SigningError(ref _s) => None,
-            Error::VerifyingError(ref _s) => None,
-            Error::TemporarilyDrained => None,
-            Error::PermanentlyDrained => None,
-            Error::FilesystemError => None,
-            Error::DBError(ref e) => Some(e),
-            Error::SocketMutexPoisoned => None,
-            Error::SocketNotConnectedToPeer => None,
-            Error::ConnectionBroken => None,
-            Error::ConnectionError => None,
-            Error::OutboxOverflow => None,
-            Error::InboxOverflow => None,
-            Error::SendError(ref _s) => None,
-            Error::RecvError(ref _s) => None,
-            Error::InvalidMessage => None,
-            Error::InvalidHandle => None,
-            Error::FullHandle => None,
-            Error::InvalidHandshake => None,
-            Error::StaleNeighbor => None,
-            Error::NoSuchNeighbor => None,
-            Error::BindError => None,
-            Error::PollError => None,
-            Error::AcceptError => None,
-            Error::RegisterError => None,
-            Error::SocketError => None,
-            Error::NotConnected => None,
-            Error::PeerNotConnected => None,
-            Error::TooManyPeers => None,
-            Error::AlreadyConnected(ref _id, ref _nk) => None,
-            Error::InProgress => None,
-            Error::Denied => None,
-            Error::NoDataUrl => None,
-            Error::PeerThrottled => None,
-            Error::LookupError(ref _s) => None,
-            Error::ChainstateError(ref _s) => None,
-            Error::ClientError(ref e) => Some(e),
-            Error::ClarityError(ref e) => Some(e),
-            Error::MARFError(ref e) => Some(e),
-            Error::CoordinatorClosed => None,
-            Error::StaleView => None,
-            Error::ConnectionCycle => None,
-            Error::NotFoundError => None,
-        }
-    }
-}
-
-impl From<chain_error> for Error {
-    fn from(e: chain_error) -> Error {
-        match e {
-            chain_error::InvalidStacksBlock(s) => {
-                Error::ChainstateError(format!("Invalid stacks block: {}", s))
-            }
-            chain_error::InvalidStacksMicroblock(msg, hash) => {
-                Error::ChainstateError(format!("Invalid stacks microblock {:?}: {}", hash, msg))
-            }
-            chain_error::InvalidStacksTransaction(s, _) => {
-                Error::ChainstateError(format!("Invalid stacks transaction: {}", s))
-            }
-            chain_error::PostConditionFailed(s) => {
-                Error::ChainstateError(format!("Postcondition failed: {}", s))
-            }
-            chain_error::ClarityError(e) => Error::ClarityError(e),
-            chain_error::DBError(e) => Error::DBError(e),
-            chain_error::NetError(e) => e,
-            chain_error::MARFError(e) => Error::MARFError(e),
-            chain_error::ReadError(e) => Error::ReadError(e),
-            chain_error::WriteError(e) => Error::WriteError(e),
-            _ => Error::ChainstateError(format!("Stacks chainstate error: {:?}", &e)),
-        }
-    }
-}
-
-impl From<db_error> for Error {
-    fn from(e: db_error) -> Error {
-        Error::DBError(e)
-    }
-}
-
-impl From<rusqlite::Error> for Error {
-    fn from(e: rusqlite::Error) -> Error {
-        Error::DBError(db_error::SqliteError(e))
-    }
-}
-
-#[cfg(test)]
-impl PartialEq for Error {
-    /// (make I/O errors comparable for testing purposes)
-    fn eq(&self, other: &Self) -> bool {
-        let s1 = format!("{:?}", self);
-        let s2 = format!("{:?}", other);
-        s1 == s2
-    }
-}
 
 /// A container for an IPv4 or IPv6 address.
 /// Rules:
@@ -591,9 +293,9 @@ impl HttpContentType {
 }
 
 impl FromStr for HttpContentType {
-    type Err = Error;
+    type Err = NetworkError;
 
-    fn from_str(header: &str) -> Result<HttpContentType, Error> {
+    fn from_str(header: &str) -> Result<HttpContentType, NetworkError> {
         let s = header.to_string().to_lowercase();
         if s == "application/octet-stream" {
             Ok(HttpContentType::Bytes)
@@ -602,7 +304,7 @@ impl FromStr for HttpContentType {
         } else if s == "application/json" {
             Ok(HttpContentType::JSON)
         } else {
-            Err(Error::DeserializeError(
+            Err(NetworkError::DeserializeError(
                 "Unsupported HTTP content type".to_string(),
             ))
         }
@@ -1393,7 +1095,7 @@ pub trait ProtocolFamily {
 
     /// Given a byte buffer of a length at last that of the value returned by preamble_size_hint,
     /// parse a Preamble and return both the Preamble and the number of bytes actually consumed by it.
-    fn read_preamble(&mut self, buf: &[u8]) -> Result<(Self::Preamble, usize), Error>;
+    fn read_preamble(&mut self, buf: &[u8]) -> Result<(Self::Preamble, usize), NetworkError>;
 
     /// Given a preamble and a byte buffer, parse out a message and return both the message and the
     /// number of bytes actually consumed by it.  Only used if the message is _not_ streamed.  The
@@ -1403,7 +1105,7 @@ pub trait ProtocolFamily {
         &mut self,
         preamble: &Self::Preamble,
         buf: &[u8],
-    ) -> Result<(Self::Message, usize), Error>;
+    ) -> Result<(Self::Message, usize), NetworkError>;
 
     /// Given a preamble and a Read, attempt to stream a message.  This will be called if
     /// `payload_len()` returns None.  This method will be repeatedly called with new data until a
@@ -1413,7 +1115,7 @@ pub trait ProtocolFamily {
         &mut self,
         preamble: &Self::Preamble,
         fd: &mut R,
-    ) -> Result<(Option<(Self::Message, usize)>, usize), Error>;
+    ) -> Result<(Option<(Self::Message, usize)>, usize), NetworkError>;
 
     /// Given a public key, a preamble, and the yet-to-be-parsed message bytes, verify the message
     /// authenticity.  Not all protocols need to do this.
@@ -1422,12 +1124,15 @@ pub trait ProtocolFamily {
         key: &StacksPublicKey,
         preamble: &Self::Preamble,
         bytes: &[u8],
-    ) -> Result<(), Error>;
+    ) -> Result<(), NetworkError>;
 
     /// Given a Write and a Message, write it out.  This method is also responsible for generating
     /// and writing out a Preamble for its Message.
-    fn write_message<W: Write>(&mut self, fd: &mut W, message: &Self::Message)
-        -> Result<(), Error>;
+    fn write_message<W: Write>(
+        &mut self,
+        fd: &mut W,
+        message: &Self::Message,
+    ) -> Result<(), NetworkError>;
 }
 
 // these implement the ProtocolFamily trait
@@ -1472,13 +1177,16 @@ macro_rules! impl_byte_array_message_codec {
             fn consensus_serialize<W: std::io::Write>(
                 &self,
                 fd: &mut W,
-            ) -> Result<(), ::net::Error> {
+            ) -> Result<(), ::util::errors::NetworkError> {
                 fd.write_all(self.as_bytes())
-                    .map_err(::net::Error::WriteError)
+                    .map_err(::util::errors::NetworkError::WriteError)
             }
-            fn consensus_deserialize<R: std::io::Read>(fd: &mut R) -> Result<$thing, ::net::Error> {
+            fn consensus_deserialize<R: std::io::Read>(
+                fd: &mut R,
+            ) -> Result<$thing, ::util::errors::NetworkError> {
                 let mut buf = [0u8; ($len as usize)];
-                fd.read_exact(&mut buf).map_err(::net::Error::ReadError)?;
+                fd.read_exact(&mut buf)
+                    .map_err(::util::errors::NetworkError::ReadError)?;
                 let ret = $thing::from_bytes(&buf).expect("BUG: buffer is not the right size");
                 Ok(ret)
             }
@@ -1829,7 +1537,6 @@ pub mod test {
     use net::poll::*;
     use net::relay::*;
     use net::rpc::RPCHandlerArgs;
-    use net::Error as net_error;
     use util::get_epoch_time_secs;
     use util::hash::*;
     use util::secp256k1::*;
@@ -1840,6 +1547,7 @@ pub mod test {
     use vm::database::STXBalance;
     use vm::types::*;
 
+    use crate::util::errors::NetworkError as net_error;
     use crate::util::messages::StacksMessageCodec;
 
     use super::*;
@@ -3174,7 +2882,7 @@ pub mod test {
             self.network.peerdb.conn()
         }
 
-        pub fn get_burnchain_view(&mut self) -> Result<BurnchainView, db_error> {
+        pub fn get_burnchain_view(&mut self) -> Result<BurnchainView, DBError> {
             let sortdb = self.sortdb.take().unwrap();
             let view_res = {
                 let chaintip = SortitionDB::get_canonical_burn_chain_tip(&sortdb.conn()).unwrap();

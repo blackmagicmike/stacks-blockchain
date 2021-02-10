@@ -4,14 +4,14 @@ use std::sync::Mutex;
 
 use stacks::chainstate::burn::BlockHeaderHash;
 use stacks::chainstate::stacks::{
-    db::blocks::MemPoolRejection, Error as ChainstateError, StacksAddress, StacksBlockHeader,
-    StacksMicroblockHeader, StacksPrivateKey, StacksPublicKey, StacksTransaction,
-    StacksTransactionSigner, TokenTransferMemo, TransactionAuth, TransactionPayload,
-    TransactionSpendingCondition, TransactionVersion, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
+    db::blocks::MemPoolRejection, StacksAddress, StacksBlockHeader, StacksMicroblockHeader,
+    StacksPrivateKey, StacksPublicKey, StacksTransaction, StacksTransactionSigner,
+    TokenTransferMemo, TransactionAuth, TransactionPayload, TransactionSpendingCondition,
+    TransactionVersion, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
 };
 use stacks::core::mempool::MemPoolDB;
 use stacks::core::CHAIN_ID_TESTNET;
-use stacks::net::Error as NetError;
+use stacks::util::errors::{ChainstateError, NetworkError as NetError};
 use stacks::util::messages::StacksMessageCodec;
 use stacks::util::{hash::*, secp256k1::*};
 use stacks::vm::{

@@ -20,7 +20,7 @@ use rusqlite::Connection;
 
 use chainstate::burn::{BurnchainHeaderHash, ConsensusHash, OpsHash, SortitionHash, Txid, VRFSeed};
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 
 use core::*;
 

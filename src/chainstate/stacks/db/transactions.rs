@@ -22,13 +22,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 
+use crate::util::errors::ChainstateError;
 use chainstate::stacks::db::*;
-use chainstate::stacks::Error;
 use chainstate::stacks::*;
 
 use std::path::{Path, PathBuf};
 
-use util::db::Error as db_error;
+use crate::util::errors::DBError as db_error;
 use util::db::{query_count, query_rows, DBConn};
 
 use util::strings::{StacksString, VecDisplay};
@@ -37,7 +37,7 @@ use util::hash::to_hex;
 
 use chainstate::burn::db::sortdb::*;
 
-use net::Error as net_error;
+use crate::util::errors::NetworkError as net_error;
 
 use vm::types::{
     AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier, SequenceData,
@@ -59,11 +59,11 @@ use vm::clarity::{
     ClarityBlockConnection, ClarityConnection, ClarityInstance, ClarityTransactionConnection,
 };
 
-use vm::errors::Error as InterpreterError;
+use crate::util::errors::InterpreterError;
 
-pub use vm::analysis::errors::CheckErrors;
+use crate::util::errors::ClarityError as clarity_error;
+pub use util::errors::CheckErrors;
 use vm::analysis::types::ContractAnalysis;
-use vm::clarity::Error as clarity_error;
 
 use vm::database::ClarityDatabase;
 
@@ -241,9 +241,9 @@ impl std::fmt::Display for TransactionNonceMismatch {
     }
 }
 
-impl<T> From<(TransactionNonceMismatch, T)> for Error {
-    fn from(e: (TransactionNonceMismatch, T)) -> Error {
-        Error::InvalidStacksTransaction(e.0.to_string(), e.0.quiet)
+impl<T> From<(TransactionNonceMismatch, T)> for ChainstateError {
+    fn from(e: (TransactionNonceMismatch, T)) -> ChainstateError {
+        ChainstateError::InvalidStacksTransaction(e.0.to_string(), e.0.quiet)
     }
 }
 
@@ -370,7 +370,7 @@ impl StacksChainState {
         clarity_tx: &mut ClarityTransactionConnection,
         fee: u64,
         payer_account: StacksAccount,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         let cur_burn_block_height = clarity_tx
             .with_clarity_db_readonly(|ref mut db| db.get_current_burnchain_block_height());
 
@@ -379,7 +379,7 @@ impl StacksChainState {
             .get_available_balance_at_burn_block(cur_burn_block_height as u64);
 
         if consolidated_balance < fee as u128 {
-            return Err(Error::InvalidFee);
+            return Err(ChainstateError::InvalidFee);
         }
 
         StacksChainState::account_debit(clarity_tx, &payer_account.principal, fee);
@@ -390,9 +390,9 @@ impl StacksChainState {
     pub fn process_transaction_precheck(
         config: &DBConfig,
         tx: &StacksTransaction,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         // valid auth?
-        tx.verify().map_err(Error::NetError)?;
+        tx.verify().map_err(ChainstateError::NetError)?;
 
         // destined for us?
         if config.chain_id != tx.chain_id {
@@ -404,7 +404,7 @@ impl StacksChainState {
             );
             warn!("{}", &msg);
 
-            return Err(Error::InvalidStacksTransaction(msg, false));
+            return Err(ChainstateError::InvalidStacksTransaction(msg, false));
         }
 
         match tx.version {
@@ -413,7 +413,7 @@ impl StacksChainState {
                     let msg = format!("Invalid tx {}: on testnet; got mainnet", tx.txid());
                     warn!("{}", &msg);
 
-                    return Err(Error::InvalidStacksTransaction(msg, false));
+                    return Err(ChainstateError::InvalidStacksTransaction(msg, false));
                 }
             }
             TransactionVersion::Testnet => {
@@ -421,7 +421,7 @@ impl StacksChainState {
                     let msg = format!("Invalid tx {}: on mainnet; got testnet", tx.txid());
                     warn!("{}", &msg);
 
-                    return Err(Error::InvalidStacksTransaction(msg, false));
+                    return Err(ChainstateError::InvalidStacksTransaction(msg, false));
                 }
             }
         }
@@ -626,16 +626,16 @@ impl StacksChainState {
     fn check_microblock_header_signer(
         mblock_hdr_1: &StacksMicroblockHeader,
         mblock_hdr_2: &StacksMicroblockHeader,
-    ) -> Result<Hash160, Error> {
+    ) -> Result<Hash160, ChainstateError> {
         let pkh1 = mblock_hdr_1.check_recover_pubkey().map_err(|e| {
-            Error::InvalidStacksTransaction(
+            ChainstateError::InvalidStacksTransaction(
                 format!("Failed to recover public key: {:?}", &e),
                 false,
             )
         })?;
 
         let pkh2 = mblock_hdr_2.check_recover_pubkey().map_err(|e| {
-            Error::InvalidStacksTransaction(
+            ChainstateError::InvalidStacksTransaction(
                 format!("Failed to recover public key: {:?}", &e),
                 false,
             )
@@ -647,7 +647,7 @@ impl StacksChainState {
                 &pkh1, &pkh2
             );
             warn!("{}", &msg);
-            return Err(Error::InvalidStacksTransaction(msg, false));
+            return Err(ChainstateError::InvalidStacksTransaction(msg, false));
         }
         Ok(pkh1)
     }
@@ -663,13 +663,14 @@ impl StacksChainState {
         env: &mut Environment,
         mblock_header_1: &StacksMicroblockHeader,
         mblock_header_2: &StacksMicroblockHeader,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value, ChainstateError> {
         let cost_before = env.global_context.cost_track.get_total();
 
         // encodes MARF reads for loading microblock height and current height, and loading and storing a
         // poison-microblock report
-        runtime_cost(ClarityCostFunction::PoisonMicroblock, env, 0)
-            .map_err(|e| Error::from_cost_error(e, cost_before.clone(), &env.global_context))?;
+        runtime_cost(ClarityCostFunction::PoisonMicroblock, env, 0).map_err(|e| {
+            ChainstateError::from_cost_error(e, cost_before.clone(), &env.global_context)
+        })?;
 
         let sender_principal = match &env.sender {
             Some(ref sender) => {
@@ -698,12 +699,14 @@ impl StacksChainState {
         let current_height = env.global_context.database.get_current_block_height();
 
         // for the microblock public key hash we had to process
-        env.add_memory(20)
-            .map_err(|e| Error::from_cost_error(e, cost_before.clone(), &env.global_context))?;
+        env.add_memory(20).map_err(|e| {
+            ChainstateError::from_cost_error(e, cost_before.clone(), &env.global_context)
+        })?;
 
         // for the block height we had to load
-        env.add_memory(4)
-            .map_err(|e| Error::from_cost_error(e, cost_before.clone(), &env.global_context))?;
+        env.add_memory(4).map_err(|e| {
+            ChainstateError::from_cost_error(e, cost_before.clone(), &env.global_context)
+        })?;
 
         // was the referenced public key hash used anytime in the past
         // MINER_REWARD_MATURITY blocks?
@@ -718,7 +721,7 @@ impl StacksChainState {
                       "microblock_pubkey_hash" => %pubkh
                 );
 
-                return Err(Error::InvalidStacksTransaction(msg, false));
+                return Err(ChainstateError::InvalidStacksTransaction(msg, false));
             }
             Some(height) => {
                 if height
@@ -731,7 +734,7 @@ impl StacksChainState {
                           "microblock_pubkey_hash" => %pubkh
                     );
 
-                    return Err(Error::InvalidStacksTransaction(msg, false));
+                    return Err(ChainstateError::InvalidStacksTransaction(msg, false));
                 }
                 height
             }
@@ -745,11 +748,14 @@ impl StacksChainState {
         {
             // account for report loaded
             env.add_memory(TypeSignature::PrincipalType.size() as u64)
-                .map_err(|e| Error::from_cost_error(e, cost_before.clone(), &env.global_context))?;
+                .map_err(|e| {
+                    ChainstateError::from_cost_error(e, cost_before.clone(), &env.global_context)
+                })?;
 
             // u128 sequence
-            env.add_memory(16)
-                .map_err(|e| Error::from_cost_error(e, cost_before.clone(), &env.global_context))?;
+            env.add_memory(16).map_err(|e| {
+                ChainstateError::from_cost_error(e, cost_before.clone(), &env.global_context)
+            })?;
 
             if mblock_header_1.sequence < seq {
                 // this sender reports a point lower in the stream where a fork occurred, and is now
@@ -821,7 +827,7 @@ impl StacksChainState {
         clarity_tx: &mut ClarityTransactionConnection,
         tx: &StacksTransaction,
         origin_account: &StacksAccount,
-    ) -> Result<StacksTransactionReceipt, Error> {
+    ) -> Result<StacksTransactionReceipt, ChainstateError> {
         match tx.payload {
             TransactionPayload::TokenTransfer(ref addr, ref amount, ref _memo) => {
                 // post-conditions are not allowed for this variant, since they're non-sensical.
@@ -830,19 +836,19 @@ impl StacksChainState {
                     let msg = format!("Invalid Stacks transaction: TokenTransfer transactions do not support post-conditions");
                     warn!("{}", &msg);
 
-                    return Err(Error::InvalidStacksTransaction(msg, false));
+                    return Err(ChainstateError::InvalidStacksTransaction(msg, false));
                 }
 
                 if *addr == origin_account.principal {
                     let msg = format!("Invalid TokenTransfer: address tried to send to itself");
                     warn!("{}", &msg);
-                    return Err(Error::InvalidStacksTransaction(msg, false));
+                    return Err(ChainstateError::InvalidStacksTransaction(msg, false));
                 }
 
                 let cost_before = clarity_tx.cost_so_far();
                 let (value, _asset_map, events) = clarity_tx
                     .run_stx_transfer(&origin_account.principal, addr, *amount as u128)
-                    .map_err(Error::ClarityError)?;
+                    .map_err(ChainstateError::ClarityError)?;
 
                 let mut total_cost = clarity_tx.cost_so_far();
                 total_cost
@@ -916,7 +922,11 @@ impl StacksChainState {
                         }
                         ClarityRuntimeTxError::CostError(cost_after, budget) => {
                             warn!("Block compute budget exceeded: if included, this will invalidate a block"; "txid" => %tx.txid(), "cost" => %cost_after, "budget" => %budget);
-                            return Err(Error::CostOverflowError(cost_before, cost_after, budget));
+                            return Err(ChainstateError::CostOverflowError(
+                                cost_before,
+                                cost_after,
+                                budget,
+                            ));
                         }
                         ClarityRuntimeTxError::Rejectable(e) => {
                             error!("Unexpected error invalidating transaction: if included, this will invalidate a block";
@@ -924,7 +934,7 @@ impl StacksChainState {
                                        "function_name" => %contract_call.function_name,
                                        "function_args" => %VecDisplay(&contract_call.function_args),
                                        "error" => ?e);
-                            return Err(Error::ClarityError(e));
+                            return Err(ChainstateError::ClarityError(e));
                         }
                     },
                 };
@@ -958,7 +968,7 @@ impl StacksChainState {
                     let msg = format!("Duplicate contract '{}'", &contract_id);
                     warn!("{}", &msg);
 
-                    return Err(Error::InvalidStacksTransaction(msg, false));
+                    return Err(ChainstateError::InvalidStacksTransaction(msg, false));
                 }
 
                 let cost_before = clarity_tx.cost_so_far();
@@ -974,7 +984,7 @@ impl StacksChainState {
                         match e {
                             clarity_error::CostError(ref cost_after, ref budget) => {
                                 warn!("Block compute budget exceeded on {}: cost before={}, after={}, budget={}", tx.txid(), &cost_before, cost_after, budget);
-                                return Err(Error::CostOverflowError(
+                                return Err(ChainstateError::CostOverflowError(
                                     cost_before,
                                     cost_after.clone(),
                                     budget.clone(),
@@ -1055,14 +1065,18 @@ impl StacksChainState {
                                       "txid" => %tx.txid(),
                                       "cost" => %cost_after,
                                       "budget" => %budget);
-                            return Err(Error::CostOverflowError(cost_before, cost_after, budget));
+                            return Err(ChainstateError::CostOverflowError(
+                                cost_before,
+                                cost_after,
+                                budget,
+                            ));
                         }
                         ClarityRuntimeTxError::Rejectable(e) => {
                             error!("Unexpected error invalidating transaction: if included, this will invalidate a block";
                                        "contract_name" => %contract_id,
                                        "code" => %contract_code_str,
                                        "error" => ?e);
-                            return Err(Error::ClarityError(e));
+                            return Err(ChainstateError::ClarityError(e));
                         }
                     },
                 };
@@ -1088,7 +1102,7 @@ impl StacksChainState {
                     let msg = format!("Invalid Stacks transaction: PoisonMicroblock transactions do not support post-conditions");
                     warn!("{}", &msg);
 
-                    return Err(Error::InvalidStacksTransaction(msg, false));
+                    return Err(ChainstateError::InvalidStacksTransaction(msg, false));
                 }
 
                 let cost_before = clarity_tx.cost_so_far();
@@ -1121,7 +1135,7 @@ impl StacksChainState {
         clarity_block: &mut ClarityTx,
         tx: &StacksTransaction,
         quiet: bool,
-    ) -> Result<(u64, StacksTransactionReceipt), Error> {
+    ) -> Result<(u64, StacksTransactionReceipt), ChainstateError> {
         debug!("Process transaction {} ({})", tx.txid(), tx.payload.name());
 
         StacksChainState::process_transaction_precheck(&clarity_block.config, tx)?;
@@ -1160,11 +1174,11 @@ impl StacksChainState {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::util::errors::ChainstateError;
     use burnchains::Address;
     use chainstate::stacks::db::test::*;
     use chainstate::stacks::index::storage::*;
     use chainstate::stacks::index::*;
-    use chainstate::stacks::Error;
     use chainstate::stacks::*;
     use chainstate::*;
 
@@ -1468,7 +1482,7 @@ pub mod test {
             assert!(res.is_err());
 
             match res {
-                Err(Error::InvalidStacksTransaction(msg, false)) => {
+                Err(ChainstateError::InvalidStacksTransaction(msg, false)) => {
                     assert!(msg.contains(&err_frag), err_frag);
                 }
                 _ => {
@@ -7108,7 +7122,7 @@ pub mod test {
 
         eprintln!("{:?}", &err);
         assert_eq!(fee, 0);
-        if let Error::InvalidFee = err {
+        if let ChainstateError::InvalidFee = err {
         } else {
             assert!(false)
         };
@@ -7354,7 +7368,7 @@ pub mod test {
         let err =
             StacksChainState::process_transaction(&mut conn, &signed_tx_poison_microblock, false)
                 .unwrap_err();
-        if let Error::ClarityError(clarity_error::BadTransaction(msg)) = err {
+        if let ChainstateError::ClarityError(clarity_error::BadTransaction(msg)) = err {
             assert!(msg.find("never seen in this fork").is_some());
         } else {
             assert!(false);

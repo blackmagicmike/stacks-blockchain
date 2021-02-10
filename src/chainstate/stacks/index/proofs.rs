@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use sha2::Digest;
 use sha2::Sha512Trunc256 as TrieHasher;
 
+use crate::util::errors::MarfError;
 use crate::util::messages::read_next;
 use chainstate::burn::{BlockHeaderHash, BLOCK_HEADER_HASH_ENCODED_SIZE};
 use chainstate::stacks::index::bits::{
@@ -41,7 +42,6 @@ use chainstate::stacks::index::node::{
 };
 use chainstate::stacks::index::storage::{TrieFileStorage, TrieStorageConnection};
 use chainstate::stacks::index::trie::Trie;
-use chainstate::stacks::index::Error;
 use chainstate::stacks::index::{
     slice_partialeq, BlockMap, MARFValue, MarfTrieId, TrieHash, TRIEHASH_ENCODED_SIZE,
 };
@@ -71,7 +71,7 @@ impl<T: MarfTrieId> ConsensusSerializable<()> for ProofTrieNode<T> {
         &self,
         _additional_data: &mut (),
         w: &mut W,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MarfError> {
         w.write_all(&[self.id])?;
         for ptr in self.ptrs.iter() {
             w.write_all(&[ptr.id, ptr.chr])?;
@@ -85,7 +85,7 @@ impl<T: MarfTrieId> ProofTriePtr<T> {
     fn try_from_trie_ptr<M: BlockMap>(
         other: &TriePtr,
         block_map: &mut M,
-    ) -> Result<ProofTriePtr<T>, Error> {
+    ) -> Result<ProofTriePtr<T>, MarfError> {
         let id = other.id;
         let chr = other.chr;
         let back_block = if is_backptr(id) {
@@ -112,10 +112,10 @@ impl<T: MarfTrieId> ProofTrieNode<T> {
     fn try_from_trie_node<N: TrieNode, M: BlockMap>(
         other: &N,
         block_map: &mut M,
-    ) -> Result<ProofTrieNode<T>, Error> {
+    ) -> Result<ProofTrieNode<T>, MarfError> {
         let id = other.id();
         let path = other.path().clone();
-        let ptrs: Result<Vec<_>, Error> = other
+        let ptrs: Result<Vec<_>, MarfError> = other
             .ptrs()
             .iter()
             .map(|trie_ptr| ProofTriePtr::try_from_trie_ptr(trie_ptr, block_map))
@@ -255,7 +255,7 @@ fn serialize_id_hash_node<W: Write, T: MarfTrieId>(
     id: &u8,
     node: &ProofTrieNode<T>,
     hashes: &[TrieHash],
-) -> Result<(), ::net::Error> {
+) -> Result<(), crate::util::errors::NetworkError> {
     id.consensus_serialize(fd)?;
     node.consensus_serialize(fd)?;
     for hash in hashes.iter() {
@@ -277,13 +277,18 @@ macro_rules! deserialize_id_hash_node {
 }
 
 impl<T: MarfTrieId> StacksMessageCodec for ProofTriePtr<T> {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), ::net::Error> {
+    fn consensus_serialize<W: Write>(
+        &self,
+        fd: &mut W,
+    ) -> Result<(), crate::util::errors::NetworkError> {
         self.id.consensus_serialize(fd)?;
         self.chr.consensus_serialize(fd)?;
         self.back_block.consensus_serialize(fd)
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<ProofTriePtr<T>, ::net::Error> {
+    fn consensus_deserialize<R: Read>(
+        fd: &mut R,
+    ) -> Result<ProofTriePtr<T>, crate::util::errors::NetworkError> {
         let id = read_next(fd)?;
         let chr = read_next(fd)?;
         let back_block = read_next(fd)?;
@@ -297,13 +302,18 @@ impl<T: MarfTrieId> StacksMessageCodec for ProofTriePtr<T> {
 }
 
 impl<T: MarfTrieId> StacksMessageCodec for ProofTrieNode<T> {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), ::net::Error> {
+    fn consensus_serialize<W: Write>(
+        &self,
+        fd: &mut W,
+    ) -> Result<(), crate::util::errors::NetworkError> {
         self.id.consensus_serialize(fd)?;
         self.path.consensus_serialize(fd)?;
         self.ptrs.consensus_serialize(fd)
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<ProofTrieNode<T>, ::net::Error> {
+    fn consensus_deserialize<R: Read>(
+        fd: &mut R,
+    ) -> Result<ProofTrieNode<T>, crate::util::errors::NetworkError> {
         let id = read_next(fd)?;
         let path = read_next(fd)?;
         let ptrs = read_next(fd)?;
@@ -313,7 +323,10 @@ impl<T: MarfTrieId> StacksMessageCodec for ProofTrieNode<T> {
 }
 
 impl<T: MarfTrieId> StacksMessageCodec for TrieMerkleProofType<T> {
-    fn consensus_serialize<W: Write>(&self, fd: &mut W) -> Result<(), ::net::Error> {
+    fn consensus_serialize<W: Write>(
+        &self,
+        fd: &mut W,
+    ) -> Result<(), crate::util::errors::NetworkError> {
         let type_byte = match self {
             TrieMerkleProofType::Node4(_) => TrieMerkleProofTypeIndicator::Node4,
             TrieMerkleProofType::Node16(_) => TrieMerkleProofTypeIndicator::Node16,
@@ -349,9 +362,13 @@ impl<T: MarfTrieId> StacksMessageCodec for TrieMerkleProofType<T> {
         }
     }
 
-    fn consensus_deserialize<R: Read>(fd: &mut R) -> Result<TrieMerkleProofType<T>, ::net::Error> {
+    fn consensus_deserialize<R: Read>(
+        fd: &mut R,
+    ) -> Result<TrieMerkleProofType<T>, crate::util::errors::NetworkError> {
         let type_byte = TrieMerkleProofTypeIndicator::from_u8(read_next(fd)?).ok_or_else(|| {
-            ::net::Error::DeserializeError("Bad type byte in Trie Merkle Proof".into())
+            crate::util::errors::NetworkError::DeserializeError(
+                "Bad type byte in Trie Merkle Proof".into(),
+            )
         })?;
 
         let codec = match type_byte {
@@ -395,7 +412,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         node: &TrieNodeType,
         all_hashes: &Vec<TrieHash>,
         chr: u8,
-    ) -> Result<Vec<TrieHash>, Error> {
+    ) -> Result<Vec<TrieHash>, MarfError> {
         let mut hashes = vec![];
         assert!(all_hashes.len() == node.ptrs().len());
 
@@ -413,7 +430,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
                 chr,
                 node
             );
-            return Err(Error::NotFoundError);
+            return Err(MarfError::NotFoundError);
         }
 
         Ok(hashes)
@@ -426,7 +443,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         storage: &mut TrieStorageConnection<T>,
         ptr: &TriePtr,
         prev_chr: u8,
-    ) -> Result<TrieMerkleProofType<T>, Error> {
+    ) -> Result<TrieMerkleProofType<T>, MarfError> {
         trace!(
             "ptr_to_proof_node: ptr={:?}, prev_chr=0x{:02x}",
             ptr,
@@ -495,7 +512,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
     /// The storage handle must be opened to the block we care about.
     fn make_initial_shunt_proof(
         storage: &mut TrieStorageConnection<T>,
-    ) -> Result<Vec<TrieMerkleProofType<T>>, Error> {
+    ) -> Result<Vec<TrieMerkleProofType<T>>, MarfError> {
         let backptr_ancestor_hashes = Trie::get_trie_ancestor_hashes_bytes(storage)?;
 
         trace!(
@@ -526,7 +543,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
     fn make_backptr_shunt_proof(
         storage: &mut TrieStorageConnection<T>,
         backptr: &TriePtr,
-    ) -> Result<Vec<TrieMerkleProofType<T>>, Error> {
+    ) -> Result<Vec<TrieMerkleProofType<T>>, MarfError> {
         // the proof is built "backwards" -- starting from the current block all the way back to backptr.
         assert!(is_backptr(backptr.id()));
 
@@ -546,7 +563,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         let ancestor_height =
             MARF::get_block_height_miner_tip(storage, &ancestor_block_hash, &block_header)?
                 .ok_or_else(|| {
-                    Error::CorruptionError(format!(
+                    MarfError::CorruptionError(format!(
                         "Could not find block height of ancestor block {} from {}",
                         &ancestor_block_hash, &block_header
                     ))
@@ -554,7 +571,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         let mut current_height =
             MARF::get_block_height_miner_tip(storage, &block_header, &block_header)?.ok_or_else(
                 || {
-                    Error::CorruptionError(format!(
+                    MarfError::CorruptionError(format!(
                         "Could not find block height of current block {} from {}",
                         &block_header, &block_header
                     ))
@@ -615,7 +632,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
 
             block_header = MARF::get_block_at_height(storage, current_height, &block_header)?
                 .ok_or_else(|| {
-                    Error::CorruptionError(format!(
+                    MarfError::CorruptionError(format!(
                         "Could not find block at height of {}",
                         current_height
                     ))
@@ -643,7 +660,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
                     let root_hash = get_node_hash(node256.as_ref(), &child_hashes, storage);
                     root_hash
                 } else {
-                    return Err(Error::CorruptionError(format!(
+                    return Err(MarfError::CorruptionError(format!(
                         "Root node at {:?} is not a TrieNode256",
                         &block_header
                     )));
@@ -860,7 +877,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         storage: &mut TrieStorageConnection<T>,
         ptrs: &Vec<TriePtr>,
         starting_chr: u8,
-    ) -> Result<Vec<TrieMerkleProofType<T>>, Error> {
+    ) -> Result<Vec<TrieMerkleProofType<T>>, MarfError> {
         trace!("make_segment_proof: ptrs = {:?}", &ptrs);
 
         assert!(ptrs.len() > 0);
@@ -1374,7 +1391,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
     fn walk_to_leaf_or_backptr(
         storage: &mut TrieStorageConnection<T>,
         path: &TriePath,
-    ) -> Result<(TrieCursor<T>, TrieNodeType, TriePtr), Error> {
+    ) -> Result<(TrieCursor<T>, TrieNodeType, TriePtr), MarfError> {
         trace!(
             "Walk path {:?} from {:?} to the first backptr",
             path,
@@ -1405,22 +1422,22 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
                 }
                 Err(e) => {
                     match e {
-                        Error::CursorError(cursor_error) => {
+                        MarfError::CursorError(cursor_error) => {
                             match cursor_error {
                                 CursorError::PathDiverged => {
                                     // we're done -- path diverged.  No backptr-walking can help us.
                                     trace!("Path diverged -- we're done.");
-                                    return Err(Error::NotFoundError);
+                                    return Err(MarfError::NotFoundError);
                                 }
                                 CursorError::ChrNotFound => {
                                     // node isn't present
                                     trace!("Failed to walk from {:?}", &node);
-                                    return Err(Error::NotFoundError);
+                                    return Err(MarfError::NotFoundError);
                                 }
                                 CursorError::BackptrEncountered(ptr) => {
                                     // expect backptr
                                     if !is_backptr(ptr.id()) {
-                                        return Err(Error::CorruptionError(format!(
+                                        return Err(MarfError::CorruptionError(format!(
                                             "Failed to walk 0x{:02x} -- got non-backptr",
                                             ptr.chr()
                                         )));
@@ -1442,7 +1459,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         }
 
         trace!("Trie has a cycle");
-        return Err(Error::CorruptionError("Trie has a cycle".to_string()));
+        return Err(MarfError::CorruptionError("Trie has a cycle".to_string()));
     }
 
     /// Make a merkle proof of inclusion from a path.
@@ -1452,7 +1469,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         path: &TriePath,
         expected_value: &MARFValue,
         root_block_header: &T,
-    ) -> Result<TrieMerkleProof<T>, Error> {
+    ) -> Result<TrieMerkleProof<T>, MarfError> {
         // accumulate proofs in reverse order -- each proof will be from an earlier and earlier
         // trie, so we'll reverse them in the end so the proof starts with the latest trie.
         let mut segment_proofs = vec![];
@@ -1523,12 +1540,12 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
                                     break;
                                 }
                             }
-                            return Err(Error::NotFoundError);
+                            return Err(MarfError::NotFoundError);
                         }
                     }
                     _ => {
                         trace!("Did not find leaf at {:?}", path);
-                        return Err(Error::NotFoundError);
+                        return Err(MarfError::NotFoundError);
                     }
                 }
                 break;
@@ -1571,7 +1588,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         key: &String,
         value: &String,
         root_block_header: &T,
-    ) -> Result<TrieMerkleProof<T>, Error> {
+    ) -> Result<TrieMerkleProof<T>, MarfError> {
         let marf_value = MARFValue::from_value(value);
         let path = TriePath::from_key(key);
         TrieMerkleProof::from_path(storage, &path, &marf_value, root_block_header)
@@ -1582,7 +1599,7 @@ impl<T: MarfTrieId> TrieMerkleProof<T> {
         key: &str,
         value: &MARFValue,
         root_block_header: &T,
-    ) -> Result<TrieMerkleProof<T>, Error> {
+    ) -> Result<TrieMerkleProof<T>, MarfError> {
         let path = TriePath::from_key(key);
         TrieMerkleProof::from_path(storage, &path, value, root_block_header)
     }

@@ -20,6 +20,16 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Deref;
 
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
+use rusqlite::Row;
+use rusqlite::Transaction;
+use rusqlite::{Connection, OpenFlags, NO_PARAMS};
+
+use burnchains::bitcoin::indexer::BitcoinIndexer;
+use burnchains::bitcoin::messages::BitcoinMessageHandler;
+use burnchains::bitcoin::BitcoinNetworkType;
+use burnchains::bitcoin::Error as btc_error;
+use burnchains::bitcoin::PeerMessage;
 use deps::bitcoin::blockdata::block::{BlockHeader, LoneBlockHeader};
 use deps::bitcoin::blockdata::constants::genesis_block;
 use deps::bitcoin::network::constants::Network;
@@ -27,27 +37,16 @@ use deps::bitcoin::network::encodable::VarInt;
 use deps::bitcoin::network::message as btc_message;
 use deps::bitcoin::network::serialize::{deserialize, serialize, BitcoinHash};
 use deps::bitcoin::util::hash::Sha256dHash;
-
-use util::uint::Uint256;
-
-use burnchains::bitcoin::indexer::BitcoinIndexer;
-use burnchains::bitcoin::messages::BitcoinMessageHandler;
-use burnchains::bitcoin::BitcoinNetworkType;
-use burnchains::bitcoin::Error as btc_error;
-use burnchains::bitcoin::PeerMessage;
-
-use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
-use rusqlite::Row;
-use rusqlite::Transaction;
-use rusqlite::{Connection, OpenFlags, NO_PARAMS};
-
 use util::db::{
     query_row, query_rows, tx_begin_immediate, tx_busy_handler, u64_to_sql, DBConn, DBTx,
-    Error as db_error, FromColumn, FromRow,
+    FromColumn, FromRow,
 };
 use util::get_epoch_time_secs;
 use util::hash::{hex_bytes, to_hex};
 use util::log;
+use util::uint::Uint256;
+
+use crate::util::errors::DBError as db_error;
 
 const BLOCK_HEADER_SIZE: u64 = 81;
 
@@ -933,20 +932,17 @@ impl BitcoinMessageHandler for SpvClient {
 
 #[cfg(test)]
 mod test {
-
-    use super::*;
-    use burnchains::bitcoin::Error as btc_error;
-    use burnchains::bitcoin::*;
-
+    use std::env;
     use std::fs::*;
 
+    use burnchains::bitcoin::Error as btc_error;
+    use burnchains::bitcoin::*;
     use deps::bitcoin::blockdata::block::{BlockHeader, LoneBlockHeader};
     use deps::bitcoin::network::serialize::{deserialize, serialize, BitcoinHash};
     use deps::bitcoin::util::hash::Sha256dHash;
-
     use util::log;
 
-    use std::env;
+    use super::*;
 
     fn get_genesis_regtest_header() -> LoneBlockHeader {
         let genesis_regtest_header = LoneBlockHeader {

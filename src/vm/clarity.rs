@@ -14,38 +14,38 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::error;
+use std::fmt;
+
+use chainstate::burn::BlockHeaderHash;
+use chainstate::stacks::boot::{
+    boot_code_id, BOOT_CODE_COSTS, BOOT_CODE_COST_VOTING_TESTNET as BOOT_CODE_COST_VOTING,
+    BOOT_CODE_POX_TESTNET,
+};
+use chainstate::stacks::events::StacksTransactionEvent;
+use chainstate::stacks::index::marf::MARF;
+use chainstate::stacks::index::{MarfTrieId, TrieHash};
+use chainstate::stacks::StacksBlockId;
+use chainstate::stacks::StacksMicroblockHeader;
 use vm::analysis;
 use vm::analysis::AnalysisDatabase;
-use vm::analysis::{errors::CheckError, errors::CheckErrors, ContractAnalysis};
+use vm::analysis::ContractAnalysis;
 use vm::ast;
-use vm::ast::{errors::ParseError, errors::ParseErrors, ContractAST};
+use vm::ast::ContractAST;
 use vm::contexts::{AssetMap, Environment, OwnedEnvironment};
 use vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use vm::database::{
     marf::WritableMarfStore, BurnStateDB, ClarityDatabase, HeadersDB, MarfedKV, RollbackWrapper,
     RollbackWrapperPersistedLog, SqliteConnection, NULL_BURN_STATE_DB, NULL_HEADER_DB,
 };
-use vm::errors::Error as InterpreterError;
 use vm::representations::SymbolicExpression;
 use vm::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, TypeSignature, Value,
 };
 
-use chainstate::burn::BlockHeaderHash;
-use chainstate::stacks::events::StacksTransactionEvent;
-use chainstate::stacks::index::marf::MARF;
-use chainstate::stacks::index::{MarfTrieId, TrieHash};
-use chainstate::stacks::Error as ChainstateError;
-use chainstate::stacks::StacksBlockId;
-use chainstate::stacks::StacksMicroblockHeader;
-
-use chainstate::stacks::boot::{
-    boot_code_id, BOOT_CODE_COSTS, BOOT_CODE_COST_VOTING_TESTNET as BOOT_CODE_COST_VOTING,
-    BOOT_CODE_POX_TESTNET,
-};
-
-use std::error;
-use std::fmt;
+use crate::util::errors::ClarityError;
+use crate::util::errors::{ChainstateError, ParseError, ParseErrors};
+use crate::util::errors::{CheckError, InterpreterError};
 
 use super::database::marf::ReadOnlyMarfStore;
 
@@ -97,99 +97,6 @@ pub struct ClarityReadOnlyConnection<'a> {
     datastore: ReadOnlyMarfStore<'a>,
     header_db: &'a dyn HeadersDB,
     burn_state_db: &'a dyn BurnStateDB,
-}
-
-#[derive(Debug)]
-pub enum Error {
-    Analysis(CheckError),
-    Parse(ParseError),
-    Interpreter(InterpreterError),
-    BadTransaction(String),
-    CostError(ExecutionCost, ExecutionCost),
-    AbortedByCallback(Option<Value>, AssetMap, Vec<StacksTransactionEvent>),
-}
-
-impl From<CheckError> for Error {
-    fn from(e: CheckError) -> Self {
-        match e.err {
-            CheckErrors::CostOverflow => {
-                Error::CostError(ExecutionCost::max_value(), ExecutionCost::max_value())
-            }
-            CheckErrors::CostBalanceExceeded(a, b) => Error::CostError(a, b),
-            CheckErrors::MemoryBalanceExceeded(_a, _b) => {
-                Error::CostError(ExecutionCost::max_value(), ExecutionCost::max_value())
-            }
-            _ => Error::Analysis(e),
-        }
-    }
-}
-
-impl From<InterpreterError> for Error {
-    fn from(e: InterpreterError) -> Self {
-        match &e {
-            InterpreterError::Unchecked(CheckErrors::CostBalanceExceeded(a, b)) => {
-                Error::CostError(a.clone(), b.clone())
-            }
-            InterpreterError::Unchecked(CheckErrors::CostOverflow) => {
-                Error::CostError(ExecutionCost::max_value(), ExecutionCost::max_value())
-            }
-            _ => Error::Interpreter(e),
-        }
-    }
-}
-
-impl From<ParseError> for Error {
-    fn from(e: ParseError) -> Self {
-        match e.err {
-            ParseErrors::CostOverflow => {
-                Error::CostError(ExecutionCost::max_value(), ExecutionCost::max_value())
-            }
-            ParseErrors::CostBalanceExceeded(a, b) => Error::CostError(a, b),
-            ParseErrors::MemoryBalanceExceeded(_a, _b) => {
-                Error::CostError(ExecutionCost::max_value(), ExecutionCost::max_value())
-            }
-            _ => Error::Parse(e),
-        }
-    }
-}
-
-impl From<ChainstateError> for Error {
-    fn from(e: ChainstateError) -> Self {
-        match e {
-            ChainstateError::InvalidStacksTransaction(msg, _) => Error::BadTransaction(msg),
-            ChainstateError::CostOverflowError(_, after, budget) => Error::CostError(after, budget),
-            ChainstateError::ClarityError(x) => x,
-            x => Error::BadTransaction(format!("{:?}", &x)),
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::CostError(ref a, ref b) => {
-                write!(f, "Cost Error: {} cost exceeded budget of {} cost", a, b)
-            }
-            Error::Analysis(ref e) => fmt::Display::fmt(e, f),
-            Error::Parse(ref e) => fmt::Display::fmt(e, f),
-            Error::AbortedByCallback(..) => write!(f, "Post condition aborted transaction"),
-            Error::Interpreter(ref e) => fmt::Display::fmt(e, f),
-            Error::BadTransaction(ref s) => fmt::Display::fmt(s, f),
-        }
-    }
-}
-
-impl error::Error for Error {
-    fn cause(&self) -> Option<&dyn error::Error> {
-        match *self {
-            Error::CostError(ref _a, ref _b) => None,
-            Error::AbortedByCallback(..) => None,
-            Error::Analysis(ref e) => Some(e),
-            Error::Parse(ref e) => Some(e),
-            Error::Interpreter(ref e) => Some(e),
-            Error::BadTransaction(ref _s) => None,
-        }
-    }
 }
 
 /// A macro for doing take/replace on a closure.
@@ -414,7 +321,7 @@ impl ClarityInstance {
         at_block: &StacksBlockId,
         header_db: &'a dyn HeadersDB,
         burn_state_db: &'a dyn BurnStateDB,
-    ) -> Result<ClarityReadOnlyConnection<'a>, Error> {
+    ) -> Result<ClarityReadOnlyConnection<'a>, ClarityError> {
         let datastore = self.datastore.begin_read_only_checked(Some(at_block))?;
 
         Ok(ClarityReadOnlyConnection {
@@ -431,13 +338,13 @@ impl ClarityInstance {
         burn_state_db: &dyn BurnStateDB,
         contract: &QualifiedContractIdentifier,
         program: &str,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value, ClarityError> {
         let mut read_only_conn = self.datastore.begin_read_only(Some(at_block));
         let clarity_db = read_only_conn.as_clarity_db(header_db, burn_state_db);
         let mut env = OwnedEnvironment::new_free(self.mainnet, clarity_db);
         env.eval_read_only(contract, program)
             .map(|(x, _, _)| x)
-            .map_err(Error::from)
+            .map_err(ClarityError::from)
     }
 
     pub fn destroy(self) -> MarfedKV {
@@ -697,9 +604,9 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
     }
 
     /// Do something to the underlying DB that involves writing.
-    pub fn with_clarity_db<F, R>(&mut self, to_do: F) -> Result<R, Error>
+    pub fn with_clarity_db<F, R>(&mut self, to_do: F) -> Result<R, ClarityError>
     where
-        F: FnOnce(&mut ClarityDatabase) -> Result<R, Error>,
+        F: FnOnce(&mut ClarityDatabase) -> Result<R, ClarityError>,
     {
         using!(self.log, "log", |log| {
             let rollback_wrapper = RollbackWrapper::from_persisted_log(self.store, log);
@@ -734,7 +641,7 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
         &mut self,
         identifier: &QualifiedContractIdentifier,
         contract_content: &str,
-    ) -> Result<(ContractAST, ContractAnalysis), Error> {
+    ) -> Result<(ContractAST, ContractAnalysis), ClarityError> {
         using!(self.cost_track, "cost tracker", |mut cost_track| {
             self.inner_with_analysis_db(|db| {
                 let ast_result = ast::build_ast(identifier, contract_content, &mut cost_track);
@@ -767,12 +674,12 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
         &mut self,
         to_do: F,
         abort_call_back: A,
-    ) -> Result<(R, AssetMap, Vec<StacksTransactionEvent>, bool), Error>
+    ) -> Result<(R, AssetMap, Vec<StacksTransactionEvent>, bool), ClarityError>
     where
         A: FnOnce(&AssetMap, &mut ClarityDatabase) -> bool,
         F: FnOnce(
             &mut OwnedEnvironment,
-        ) -> Result<(R, AssetMap, Vec<StacksTransactionEvent>), Error>,
+        ) -> Result<(R, AssetMap, Vec<StacksTransactionEvent>), ClarityError>,
     {
         using!(self.log, "log", |log| {
             using!(self.cost_track, "cost tracker", |cost_track| {
@@ -845,9 +752,13 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
         from: &PrincipalData,
         to: &PrincipalData,
         amount: u128,
-    ) -> Result<(Value, AssetMap, Vec<StacksTransactionEvent>), Error> {
+    ) -> Result<(Value, AssetMap, Vec<StacksTransactionEvent>), ClarityError> {
         self.with_abort_callback(
-            |vm_env| vm_env.stx_transfer(from, to, amount).map_err(Error::from),
+            |vm_env| {
+                vm_env
+                    .stx_transfer(from, to, amount)
+                    .map_err(ClarityError::from)
+            },
             |_, _| false,
         )
         .and_then(|(value, assets, events, _)| Ok((value, assets, events)))
@@ -865,7 +776,7 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
         public_function: &str,
         args: &[Value],
         abort_call_back: F,
-    ) -> Result<(Value, AssetMap, Vec<StacksTransactionEvent>), Error>
+    ) -> Result<(Value, AssetMap, Vec<StacksTransactionEvent>), ClarityError>
     where
         F: FnOnce(&AssetMap, &mut ClarityDatabase) -> bool,
     {
@@ -883,13 +794,13 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
                         public_function,
                         &expr_args,
                     )
-                    .map_err(Error::from)
+                    .map_err(ClarityError::from)
             },
             abort_call_back,
         )
         .and_then(|(value, assets, events, aborted)| {
             if aborted {
-                Err(Error::AbortedByCallback(Some(value), assets, events))
+                Err(ClarityError::AbortedByCallback(Some(value), assets, events))
             } else {
                 Ok((value, assets, events))
             }
@@ -907,7 +818,7 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
         contract_ast: &ContractAST,
         contract_str: &str,
         abort_call_back: F,
-    ) -> Result<(AssetMap, Vec<StacksTransactionEvent>), Error>
+    ) -> Result<(AssetMap, Vec<StacksTransactionEvent>), ClarityError>
     where
         F: FnOnce(&AssetMap, &mut ClarityDatabase) -> bool,
     {
@@ -915,12 +826,12 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
             |vm_env| {
                 vm_env
                     .initialize_contract_from_ast(identifier.clone(), contract_ast, contract_str)
-                    .map_err(Error::from)
+                    .map_err(ClarityError::from)
             },
             abort_call_back,
         )?;
         if aborted {
-            Err(Error::AbortedByCallback(None, asset_map, events))
+            Err(ClarityError::AbortedByCallback(None, asset_map, events))
         } else {
             Ok((asset_map, events))
         }
@@ -932,12 +843,12 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
         sender: &PrincipalData,
         mblock_header_1: &StacksMicroblockHeader,
         mblock_header_2: &StacksMicroblockHeader,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value, ClarityError> {
         self.with_abort_callback(
             |vm_env| {
                 vm_env
                     .handle_poison_microblock(sender, mblock_header_1, mblock_header_2)
-                    .map_err(Error::from)
+                    .map_err(ClarityError::from)
             },
             |_, _| false,
         )
@@ -968,9 +879,9 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
 
     /// Evaluate a raw Clarity snippit
     #[cfg(test)]
-    pub fn clarity_eval_raw(&mut self, code: &str) -> Result<Value, Error> {
+    pub fn clarity_eval_raw(&mut self, code: &str) -> Result<Value, ClarityError> {
         let (result, _, _, _) = self.with_abort_callback(
-            |vm_env| vm_env.eval_raw(code).map_err(Error::from),
+            |vm_env| vm_env.eval_raw(code).map_err(ClarityError::from),
             |_, _| false,
         )?;
         Ok(result)
@@ -981,9 +892,13 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
         &mut self,
         contract: &QualifiedContractIdentifier,
         code: &str,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value, ClarityError> {
         let (result, _, _, _) = self.with_abort_callback(
-            |vm_env| vm_env.eval_read_only(contract, code).map_err(Error::from),
+            |vm_env| {
+                vm_env
+                    .eval_read_only(contract, code)
+                    .map_err(ClarityError::from)
+            },
             |_, _| false,
         )?;
         Ok(result)
@@ -992,15 +907,18 @@ impl<'a, 'b> ClarityTransactionConnection<'a, 'b> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use chainstate::stacks::index::storage::TrieFileStorage;
-    use rusqlite::NO_PARAMS;
     use std::fs;
-    use vm::analysis::errors::CheckErrors;
+
+    use rusqlite::NO_PARAMS;
+
+    use chainstate::stacks::index::storage::TrieFileStorage;
+    use util::errors::CheckErrors;
     use vm::database::{
         ClarityBackingStore, MarfedKV, STXBalance, NULL_BURN_STATE_DB, NULL_HEADER_DB,
     };
     use vm::types::{StandardPrincipalData, Value};
+
+    use super::*;
 
     #[test]
     pub fn bad_syntax_test() {
@@ -1504,7 +1422,7 @@ mod tests {
                     )
                 })
                 .unwrap_err();
-            let result_value = if let Error::AbortedByCallback(v, ..) = e {
+            let result_value = if let ClarityError::AbortedByCallback(v, ..) = e {
                 v.unwrap()
             } else {
                 panic!("Expects a AbortedByCallback error")
@@ -1741,7 +1659,7 @@ mod tests {
                 ))
                 .unwrap_err()
             {
-                Error::CostError(total, limit) => {
+                ClarityError::CostError(total, limit) => {
                     eprintln!("{}, {}", total, limit);
                     limit.runtime == 100 && total.runtime > 100
                 }

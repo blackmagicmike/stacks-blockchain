@@ -14,31 +14,29 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use rusqlite::OptionalExtension;
 use std::collections::{HashMap, VecDeque};
 use std::convert::{TryFrom, TryInto};
 
-use vm::contracts::Contract;
-use vm::errors::{
-    CheckErrors, Error, IncomparableError, InterpreterError, InterpreterResult as Result,
-    RuntimeErrorType,
-};
-use vm::representations::ClarityName;
-use vm::types::{
-    OptionalData, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
-    TupleTypeSignature, TypeSignature, Value, NONE,
-};
+use rusqlite::OptionalExtension;
 
 use burnchains::BurnchainHeaderHash;
+use chainstate::burn::db::sortdb::{
+    SortitionDB, SortitionDBConn, SortitionHandleConn, SortitionHandleTx, SortitionId,
+};
 use chainstate::burn::{BlockHeaderHash, ConsensusHash, VRFSeed};
 use chainstate::stacks::db::{MinerPaymentSchedule, StacksHeaderInfo};
 use chainstate::stacks::index::proofs::TrieMerkleProof;
 use chainstate::stacks::StacksBlockHeader;
 use chainstate::stacks::{StacksAddress, StacksBlockId};
-
+use core::{
+    BITCOIN_REGTEST_FIRST_BLOCK_HASH, BITCOIN_REGTEST_FIRST_BLOCK_HEIGHT,
+    BITCOIN_REGTEST_FIRST_BLOCK_TIMESTAMP, FIRST_BURNCHAIN_CONSENSUS_HASH, FIRST_STACKS_BLOCK_HASH,
+    POX_REWARD_CYCLE_LENGTH,
+};
 use util::db::{DBConn, FromRow};
 use util::hash::{to_hex, Hash160, Sha256Sum, Sha512Trunc256Sum};
 use vm::analysis::{AnalysisDatabase, ContractAnalysis};
+use vm::contracts::Contract;
 use vm::costs::CostOverflowingMath;
 use vm::database::structures::{
     ClarityDeserializable, ClaritySerializable, ContractMetadata, DataMapMetadata,
@@ -47,15 +45,15 @@ use vm::database::structures::{
 };
 use vm::database::RollbackWrapper;
 use vm::database::{ClarityBackingStore, MarfedKV};
-
-use chainstate::burn::db::sortdb::{
-    SortitionDB, SortitionDBConn, SortitionHandleConn, SortitionHandleTx, SortitionId,
+use vm::errors::{CheckErrors, InterpreterResult as Result};
+use vm::representations::ClarityName;
+use vm::types::{
+    OptionalData, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
+    TupleTypeSignature, TypeSignature, Value, NONE,
 };
 
-use core::{
-    BITCOIN_REGTEST_FIRST_BLOCK_HASH, BITCOIN_REGTEST_FIRST_BLOCK_HEIGHT,
-    BITCOIN_REGTEST_FIRST_BLOCK_TIMESTAMP, FIRST_BURNCHAIN_CONSENSUS_HASH, FIRST_STACKS_BLOCK_HASH,
-    POX_REWARD_CYCLE_LENGTH,
+use crate::util::errors::{
+    IncomparableError, InterpreterError, InterpreterFailureError, RuntimeErrorType,
 };
 
 pub const STORE_CONTRACT_SRC_INTERFACE: bool = true;
@@ -826,7 +824,7 @@ impl<'a> ClarityDatabase<'a> {
 //   will throw NoSuchFoo errors instead of NoSuchContract errors.
 fn map_no_contract_as_none<T>(res: Result<Option<T>>) -> Result<Option<T>> {
     res.or_else(|e| match e {
-        Error::Unchecked(CheckErrors::NoSuchContract(_)) => Ok(None),
+        InterpreterError::Unchecked(CheckErrors::NoSuchContract(_)) => Ok(None),
         x => Err(x),
     })
 }

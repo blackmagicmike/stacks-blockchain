@@ -14,14 +14,20 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use serde::Deserialize;
 use std::convert::TryInto;
 use std::io::Write;
+
+use serde::Deserialize;
+
 use util::hash::{hex_bytes, to_hex};
 use vm::contracts::Contract;
 use vm::database::ClarityDatabase;
-use vm::errors::{Error, IncomparableError, InterpreterError, InterpreterResult, RuntimeErrorType};
+use vm::errors::InterpreterResult;
 use vm::types::{OptionalData, PrincipalData, TupleTypeSignature, TypeSignature, Value, NONE};
+
+use crate::util::errors::{
+    IncomparableError, InterpreterError, InterpreterFailureError, RuntimeErrorType,
+};
 
 pub trait ClaritySerializable {
     fn serialize(&self) -> String;
@@ -134,7 +140,7 @@ pub struct STXBalanceSnapshot<'db, 'conn> {
     db_ref: &'conn mut ClarityDatabase<'db>,
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = std::result::Result<T, InterpreterError>;
 
 impl ClaritySerializable for STXBalance {
     fn serialize(&self) -> String {
@@ -207,7 +213,7 @@ impl<'db, 'conn> STXBalanceSnapshot<'db, 'conn> {
 
     pub fn transfer_to(mut self, recipient: &PrincipalData, amount: u128) -> Result<()> {
         if !self.can_transfer(amount) {
-            return Err(InterpreterError::InsufficientBalance.into());
+            return Err(InterpreterFailureError::InsufficientBalance.into());
         }
 
         let recipient_key = ClarityDatabase::make_key_for_account_balance(recipient);
@@ -216,11 +222,13 @@ impl<'db, 'conn> STXBalanceSnapshot<'db, 'conn> {
             .get(&recipient_key)
             .unwrap_or(STXBalance::zero());
 
-        recipient_balance.amount_unlocked =
-            recipient_balance
-                .amount_unlocked
-                .checked_add(amount)
-                .ok_or(Error::Runtime(RuntimeErrorType::ArithmeticOverflow, None))?;
+        recipient_balance.amount_unlocked = recipient_balance
+            .amount_unlocked
+            .checked_add(amount)
+            .ok_or(InterpreterError::Runtime(
+            RuntimeErrorType::ArithmeticOverflow,
+            None,
+        ))?;
 
         self.debit(amount);
         self.db_ref.put(&recipient_key, &recipient_balance);

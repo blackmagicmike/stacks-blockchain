@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use vm::analysis::errors::{CheckError, CheckErrors, CheckResult};
+use util::errors::CheckErrors;
 use vm::analysis::types::{AnalysisPass, ContractAnalysis};
 use vm::analysis::AnalysisDatabase;
 use vm::functions::define::{DefineFunctions, DefineFunctionsParsed};
@@ -24,6 +24,9 @@ use vm::functions::NativeFunctions;
 use vm::representations::SymbolicExpressionType::{Atom, AtomValue, List, LiteralValue};
 use vm::representations::{ClarityName, SymbolicExpression};
 use vm::types::{FunctionType, TraitIdentifier, TypeSignature, Value};
+
+use crate::util::errors::CheckError;
+use crate::vm::analysis::CheckResult;
 
 pub struct TraitChecker {}
 

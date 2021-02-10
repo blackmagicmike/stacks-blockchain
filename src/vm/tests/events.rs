@@ -14,15 +14,18 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use chainstate::stacks::events::*;
 use std::convert::TryInto;
-use vm::analysis::errors::CheckError;
+
+use chainstate::stacks::events::*;
 use vm::contexts::{Environment, GlobalContext, OwnedEnvironment};
 use vm::database::MemoryBackingStore;
-use vm::errors::{CheckErrors, Error, RuntimeErrorType};
+use vm::errors::CheckErrors;
 use vm::tests::execute;
 use vm::types::TypeSignature::UIntType;
 use vm::types::{AssetIdentifier, PrincipalData, QualifiedContractIdentifier, ResponseData, Value};
+
+use crate::util::errors::InterpreterError;
+use crate::util::errors::{CheckError, RuntimeErrorType};
 
 fn helper_execute(contract: &str, method: &str) -> (Value, Vec<StacksTransactionEvent>) {
     let contract_id = QualifiedContractIdentifier::local("contract").unwrap();

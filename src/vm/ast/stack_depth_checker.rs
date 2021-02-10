@@ -14,12 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use vm::ast::errors::{ParseError, ParseErrors, ParseResult};
+use crate::vm::ast::ParseResult;
 use vm::ast::types::{BuildASTPass, ContractAST};
 use vm::representations::PreSymbolicExpression;
 use vm::representations::PreSymbolicExpressionType::List;
-
 use vm::MAX_CALL_STACK_DEPTH;
+
+use crate::util::errors::{ParseError, ParseErrors};
 
 // allow  the AST to get deeper than the max call stack depth,
 //    but not much deeper (things like tuples would increase the

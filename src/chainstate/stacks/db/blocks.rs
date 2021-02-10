@@ -22,68 +22,52 @@ use std::fs;
 use std::io;
 use std::io::prelude::*;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
+use rand::thread_rng;
+use rand::RngCore;
 use rusqlite::Connection;
 use rusqlite::DatabaseName;
+use rusqlite::{Error as sqlite_error, OptionalExtension};
 
-use core::mempool::MAXIMUM_MEMPOOL_TX_CHAINING;
-use core::*;
-
+use chainstate::burn::db::sortdb::*;
 use chainstate::burn::operations::*;
-
+use chainstate::burn::BlockSnapshot;
 use chainstate::stacks::db::accounts::MinerReward;
 use chainstate::stacks::db::transactions::TransactionNonceMismatch;
 use chainstate::stacks::db::*;
 use chainstate::stacks::index::MarfTrieId;
-use chainstate::stacks::Error;
 use chainstate::stacks::*;
-
-use chainstate::burn::BlockSnapshot;
-
-use std::path::{Path, PathBuf};
-
-use util::db::Error as db_error;
+use core::mempool::MAXIMUM_MEMPOOL_TX_CHAINING;
+use core::*;
+use net::BlocksInvData;
+use net::MAX_MESSAGE_LEN;
+use util::db::u64_to_sql;
 use util::db::{
     query_count, query_int, query_row, query_row_columns, query_row_panic, query_rows,
     tx_busy_handler, DBConn, FromColumn, FromRow,
 };
-
-use util::db::u64_to_sql;
+pub use util::errors::CheckErrors;
 use util::get_epoch_time_secs;
 use util::hash::to_hex;
-use util::strings::StacksString;
-
 use util::retry::BoundReader;
-
-use chainstate::burn::db::sortdb::*;
-
-use net::BlocksInvData;
-use net::Error as net_error;
-use net::MAX_MESSAGE_LEN;
-
+use util::strings::StacksString;
+use vm::analysis::run_analysis;
+use vm::ast::build_ast;
+use vm::clarity::{ClarityBlockConnection, ClarityConnection, ClarityInstance};
+use vm::contexts::AssetMap;
+use vm::contracts::Contract;
+use vm::costs::LimitedCostTracker;
+use vm::database::{BurnStateDB, ClarityDatabase, NULL_BURN_STATE_DB, NULL_HEADER_DB};
 use vm::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, SequenceData,
     StandardPrincipalData, TupleData, TypeSignature, Value,
 };
 
-use vm::contexts::AssetMap;
-
-use vm::analysis::run_analysis;
-use vm::ast::build_ast;
-
-use vm::clarity::{ClarityBlockConnection, ClarityConnection, ClarityInstance};
-
-pub use vm::analysis::errors::{CheckError, CheckErrors};
-
-use vm::database::{BurnStateDB, ClarityDatabase, NULL_BURN_STATE_DB, NULL_HEADER_DB};
-
-use vm::contracts::Contract;
-use vm::costs::LimitedCostTracker;
-
-use rand::thread_rng;
-use rand::RngCore;
-
-use rusqlite::{Error as sqlite_error, OptionalExtension};
+use crate::util::errors::ChainstateError;
+pub use crate::util::errors::CheckError;
+use crate::util::errors::DBError as db_error;
+use crate::util::errors::NetworkError as net_error;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StagingMicroblock {
@@ -128,7 +112,7 @@ pub struct StagingUserBurnSupport {
 pub enum MemPoolRejection {
     SerializationFailure(net_error),
     DeserializationFailure(net_error),
-    FailedToValidate(Error),
+    FailedToValidate(ChainstateError),
     FeeTooLow(u64, u64),
     BadNonces(TransactionNonceMismatch),
     NotEnoughFunds(u128, u128),
@@ -396,13 +380,13 @@ impl BlockStreamData {
     pub fn new_microblock_confirmed(
         chainstate: &StacksChainState,
         tail_index_microblock_hash: StacksBlockId,
-    ) -> Result<BlockStreamData, Error> {
+    ) -> Result<BlockStreamData, ChainstateError> {
         // look up parent
         let mblock_info = StacksChainState::load_staging_microblock_info_indexed(
             &chainstate.db(),
             &tail_index_microblock_hash,
         )?
-        .ok_or(Error::NoSuchBlockError)?;
+        .ok_or(ChainstateError::NoSuchBlockError)?;
 
         let parent_index_block_hash = StacksBlockHeader::make_index_block_hash(
             &mblock_info.consensus_hash,
@@ -433,13 +417,13 @@ impl BlockStreamData {
         chainstate: &StacksChainState,
         anchored_index_block_hash: StacksBlockId,
         seq: u16,
-    ) -> Result<BlockStreamData, Error> {
+    ) -> Result<BlockStreamData, ChainstateError> {
         let mblock_info = StacksChainState::load_next_descendant_microblock(
             &chainstate.db(),
             &anchored_index_block_hash,
             seq,
         )?
-        .ok_or(Error::NoSuchBlockError)?;
+        .ok_or(ChainstateError::NoSuchBlockError)?;
 
         Ok(BlockStreamData {
             index_block_hash: anchored_index_block_hash.clone(),
@@ -462,7 +446,7 @@ impl BlockStreamData {
         chainstate: &mut StacksChainState,
         fd: &mut W,
         count: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         if self.is_microblock {
             let mut num_written = 0;
             if !self.unconfirmed {
@@ -500,7 +484,7 @@ impl BlockStreamData {
                                 // blocked
                                 return Ok(num_written);
                             } else {
-                                return Err(Error::WriteError(e));
+                                return Err(ChainstateError::WriteError(e));
                             }
                         }
                     };
@@ -529,7 +513,7 @@ impl StacksChainState {
     pub fn get_index_block_path(
         blocks_dir: &str,
         index_block_hash: &StacksBlockId,
-    ) -> Result<String, Error> {
+    ) -> Result<String, ChainstateError> {
         let block_hash_bytes = index_block_hash.as_bytes();
         let mut block_path = PathBuf::from(blocks_dir);
 
@@ -539,7 +523,7 @@ impl StacksChainState {
 
         let blocks_path_str = block_path
             .to_str()
-            .ok_or_else(|| Error::DBError(db_error::ParseError))?
+            .ok_or_else(|| ChainstateError::DBError(db_error::ParseError))?
             .to_string();
         Ok(blocks_path_str)
     }
@@ -549,7 +533,7 @@ impl StacksChainState {
         blocks_dir: &str,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<String, Error> {
+    ) -> Result<String, ChainstateError> {
         let index_block_hash = StacksBlockHeader::make_index_block_hash(consensus_hash, block_hash);
         StacksChainState::get_index_block_path(blocks_dir, &index_block_hash)
     }
@@ -559,7 +543,7 @@ impl StacksChainState {
         blocks_dir: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<String, Error> {
+    ) -> Result<String, ChainstateError> {
         let index_block_hash = StacksBlockHeader::make_index_block_hash(consensus_hash, block_hash);
         let block_hash_bytes = index_block_hash.as_bytes();
         let mut block_path = PathBuf::from(blocks_dir);
@@ -572,7 +556,7 @@ impl StacksChainState {
         block_path.push(format!("{}", to_hex(block_hash_bytes)));
         let blocks_path_str = block_path
             .to_str()
-            .ok_or_else(|| Error::DBError(db_error::ParseError))?
+            .ok_or_else(|| ChainstateError::DBError(db_error::ParseError))?
             .to_string();
         Ok(blocks_path_str)
     }
@@ -581,9 +565,9 @@ impl StacksChainState {
         path: &String,
         delete_on_error: bool,
         mut writer: F,
-    ) -> Result<(), Error>
+    ) -> Result<(), ChainstateError>
     where
-        F: FnMut(&mut fs::File) -> Result<(), Error>,
+        F: FnMut(&mut fs::File) -> Result<(), ChainstateError>,
     {
         let path_tmp = format!("{}.tmp", path);
         let mut fd = fs::OpenOptions::new()
@@ -595,10 +579,10 @@ impl StacksChainState {
             .map_err(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
                     error!("File not found: {:?}", &path_tmp);
-                    Error::DBError(db_error::NotFoundError)
+                    ChainstateError::DBError(db_error::NotFoundError)
                 } else {
                     error!("Failed to open {:?}: {:?}", &path_tmp, &e);
-                    Error::DBError(db_error::IOError(e))
+                    ChainstateError::DBError(db_error::IOError(e))
                 }
             })?;
 
@@ -611,53 +595,54 @@ impl StacksChainState {
         })?;
 
         fd.sync_all()
-            .map_err(|e| Error::DBError(db_error::IOError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::IOError(e)))?;
 
         // atomically put this file in place
         // TODO: this is atomic but not crash-consistent!  need to fsync the dir as well
         trace!("Rename {:?} to {:?}", &path_tmp, &path);
-        fs::rename(&path_tmp, &path).map_err(|e| Error::DBError(db_error::IOError(e)))?;
+        fs::rename(&path_tmp, &path).map_err(|e| ChainstateError::DBError(db_error::IOError(e)))?;
 
         Ok(())
     }
 
-    pub fn atomic_file_write(path: &String, bytes: &Vec<u8>) -> Result<(), Error> {
+    pub fn atomic_file_write(path: &String, bytes: &Vec<u8>) -> Result<(), ChainstateError> {
         StacksChainState::atomic_file_store(path, false, |ref mut fd| {
             fd.write_all(bytes)
-                .map_err(|e| Error::DBError(db_error::IOError(e)))
+                .map_err(|e| ChainstateError::DBError(db_error::IOError(e)))
         })
     }
 
-    pub fn get_file_size(path: &String) -> Result<u64, Error> {
+    pub fn get_file_size(path: &String) -> Result<u64, ChainstateError> {
         let sz = match fs::metadata(path) {
             Ok(md) => md.len(),
             Err(e) => {
                 if e.kind() == io::ErrorKind::NotFound {
-                    return Err(Error::DBError(db_error::NotFoundError));
+                    return Err(ChainstateError::DBError(db_error::NotFoundError));
                 } else {
                     error!("Failed to stat {:?}: {:?}", &path, &e);
-                    return Err(Error::DBError(db_error::IOError(e)));
+                    return Err(ChainstateError::DBError(db_error::IOError(e)));
                 }
             }
         };
         Ok(sz)
     }
 
-    pub fn consensus_load<T: StacksMessageCodec>(path: &String) -> Result<T, Error> {
+    pub fn consensus_load<T: StacksMessageCodec>(path: &String) -> Result<T, ChainstateError> {
         let mut fd = fs::OpenOptions::new()
             .read(true)
             .write(false)
             .open(path)
             .map_err(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
-                    Error::DBError(db_error::NotFoundError)
+                    ChainstateError::DBError(db_error::NotFoundError)
                 } else {
-                    Error::DBError(db_error::IOError(e))
+                    ChainstateError::DBError(db_error::IOError(e))
                 }
             })?;
 
         let mut bound_reader = BoundReader::from_reader(&mut fd, MAX_MESSAGE_LEN as u64);
-        let inst = T::consensus_deserialize(&mut bound_reader).map_err(Error::NetError)?;
+        let inst =
+            T::consensus_deserialize(&mut bound_reader).map_err(ChainstateError::NetError)?;
         Ok(inst)
     }
 
@@ -665,7 +650,7 @@ impl StacksChainState {
     pub fn has_block_indexed(
         blocks_dir: &String,
         index_block_hash: &StacksBlockId,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         let block_path = StacksChainState::get_index_block_path(blocks_dir, index_block_hash)?;
         match fs::metadata(block_path) {
             Ok(_) => Ok(true),
@@ -673,7 +658,7 @@ impl StacksChainState {
                 if e.kind() == io::ErrorKind::NotFound {
                     Ok(false)
                 } else {
-                    Err(Error::DBError(db_error::IOError(e)))
+                    Err(ChainstateError::DBError(db_error::IOError(e)))
                 }
             }
         }
@@ -685,7 +670,7 @@ impl StacksChainState {
         blocks_dir: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         let staging_status =
             StacksChainState::has_staging_block(blocks_db, consensus_hash, block_hash)?;
         let index_block_hash = StacksBlockHeader::make_index_block_hash(consensus_hash, block_hash);
@@ -709,7 +694,7 @@ impl StacksChainState {
         blocks_dir: &String,
         consensus_hash: &ConsensusHash,
         block: &StacksBlock,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         let block_hash = block.block_hash();
         let block_path = StacksChainState::make_block_dir(blocks_dir, consensus_hash, &block_hash)?;
 
@@ -720,7 +705,9 @@ impl StacksChainState {
             &block_path
         );
         StacksChainState::atomic_file_store(&block_path, true, |ref mut fd| {
-            block.consensus_serialize(fd).map_err(Error::NetError)
+            block
+                .consensus_serialize(fd)
+                .map_err(ChainstateError::NetError)
         })
     }
 
@@ -730,7 +717,7 @@ impl StacksChainState {
         blocks_path: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         let block_path =
             StacksChainState::make_block_dir(blocks_path, consensus_hash, &block_hash)?;
         StacksChainState::atomic_file_write(&block_path, &vec![])
@@ -770,10 +757,10 @@ impl StacksChainState {
     /// Get a list of all anchored blocks' hashes, and their burnchain headers
     pub fn list_blocks(
         blocks_conn: &DBConn,
-    ) -> Result<Vec<(ConsensusHash, BlockHeaderHash)>, Error> {
+    ) -> Result<Vec<(ConsensusHash, BlockHeaderHash)>, ChainstateError> {
         let list_block_sql = "SELECT * FROM staging_blocks ORDER BY height".to_string();
         let mut blocks = query_rows::<StagingBlock, _>(blocks_conn, &list_block_sql, NO_PARAMS)
-            .map_err(Error::DBError)?;
+            .map_err(ChainstateError::DBError)?;
 
         Ok(blocks
             .drain(..)
@@ -782,9 +769,12 @@ impl StacksChainState {
     }
 
     /// Get all stacks block headers.  Great for testing!
-    pub fn get_all_staging_block_headers(blocks_conn: &DBConn) -> Result<Vec<StagingBlock>, Error> {
+    pub fn get_all_staging_block_headers(
+        blocks_conn: &DBConn,
+    ) -> Result<Vec<StagingBlock>, ChainstateError> {
         let sql = "SELECT * FROM staging_blocks ORDER BY height".to_string();
-        query_rows::<StagingBlock, _>(blocks_conn, &sql, NO_PARAMS).map_err(Error::DBError)
+        query_rows::<StagingBlock, _>(blocks_conn, &sql, NO_PARAMS)
+            .map_err(ChainstateError::DBError)
     }
 
     /// Get a list of all microblocks' hashes, and their anchored blocks' hashes
@@ -792,7 +782,7 @@ impl StacksChainState {
     pub fn list_microblocks(
         blocks_conn: &DBConn,
         blocks_dir: &String,
-    ) -> Result<Vec<(ConsensusHash, BlockHeaderHash, Vec<BlockHeaderHash>)>, Error> {
+    ) -> Result<Vec<(ConsensusHash, BlockHeaderHash, Vec<BlockHeaderHash>)>, ChainstateError> {
         let mut blocks = StacksChainState::list_blocks(blocks_conn)?;
         let mut ret = vec![];
 
@@ -804,7 +794,7 @@ impl StacksChainState {
                 &list_microblock_sql,
                 &list_microblock_args,
             )
-            .map_err(Error::DBError)?;
+            .map_err(ChainstateError::DBError)?;
 
             let microblock_hashes = microblocks.drain(..).map(|mb| mb.microblock_hash).collect();
             ret.push((consensus_hash, block_hash, microblock_hashes));
@@ -821,7 +811,7 @@ impl StacksChainState {
         blocks_dir: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, ChainstateError> {
         let block_path = StacksChainState::get_block_path(blocks_dir, consensus_hash, block_hash)?;
         let sz = StacksChainState::get_file_size(&block_path)?;
         if sz == 0 {
@@ -839,15 +829,15 @@ impl StacksChainState {
             .open(&block_path)
             .map_err(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
-                    Error::DBError(db_error::NotFoundError)
+                    ChainstateError::DBError(db_error::NotFoundError)
                 } else {
-                    Error::DBError(db_error::IOError(e))
+                    ChainstateError::DBError(db_error::IOError(e))
                 }
             })?;
 
         let mut ret = vec![];
         fd.read_to_end(&mut ret)
-            .map_err(|e| Error::DBError(db_error::IOError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::IOError(e)))?;
         Ok(Some(ret))
     }
 
@@ -859,7 +849,7 @@ impl StacksChainState {
         blocks_dir: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<StacksBlock>, Error> {
+    ) -> Result<Option<StacksBlock>, ChainstateError> {
         let block_path = StacksChainState::get_block_path(blocks_dir, consensus_hash, block_hash)?;
         let sz = StacksChainState::get_file_size(&block_path)?;
         if sz == 0 {
@@ -879,7 +869,7 @@ impl StacksChainState {
         blocks_dir: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<StacksBlockHeader>, Error> {
+    ) -> Result<Option<StacksBlockHeader>, ChainstateError> {
         let block_path = StacksChainState::get_block_path(blocks_dir, consensus_hash, block_hash)?;
         let sz = StacksChainState::get_file_size(&block_path)?;
         if sz == 0 {
@@ -892,9 +882,9 @@ impl StacksChainState {
     }
 
     /// Closure for defaulting to an empty microblock stream if a microblock stream file is not found
-    fn empty_stream(e: Error) -> Result<Option<Vec<StacksMicroblock>>, Error> {
+    fn empty_stream(e: ChainstateError) -> Result<Option<Vec<StacksMicroblock>>, ChainstateError> {
         match e {
-            Error::DBError(ref dbe) => match dbe {
+            ChainstateError::DBError(ref dbe) => match dbe {
                 db_error::NotFoundError => Ok(Some(vec![])),
                 _ => Err(e),
             },
@@ -908,18 +898,18 @@ impl StacksChainState {
         conn: &DBConn,
         sql_query: &String,
         sql_args: P,
-    ) -> Result<Vec<Vec<u8>>, Error>
+    ) -> Result<Vec<Vec<u8>>, ChainstateError>
     where
         P: IntoIterator,
         P::Item: ToSql,
     {
         let mut stmt = conn
             .prepare(sql_query)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         let mut rows = stmt
             .query(sql_args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         // gather
         let mut blobs = vec![];
@@ -938,7 +928,7 @@ impl StacksChainState {
         block_conn: &DBConn,
         table: &str,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, ChainstateError> {
         let sql = format!("SELECT block_data FROM {} WHERE block_hash = ?1", table);
         let args = [&block_hash];
         let mut blobs = StacksChainState::load_block_data_blobs(block_conn, &sql, &args)?;
@@ -963,7 +953,7 @@ impl StacksChainState {
     fn load_staging_microblock_bytes(
         block_conn: &DBConn,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, ChainstateError> {
         StacksChainState::inner_load_staging_block_bytes(
             block_conn,
             "staging_microblocks_data",
@@ -991,11 +981,11 @@ impl StacksChainState {
         blocks_path: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<StagingBlock>, Error> {
+    ) -> Result<Option<StagingBlock>, ChainstateError> {
         let sql = "SELECT * FROM staging_blocks WHERE anchored_block_hash = ?1 AND consensus_hash = ?2 AND orphaned = 0 AND processed = 0".to_string();
         let args: &[&dyn ToSql] = &[&block_hash, &consensus_hash];
-        let mut rows =
-            query_rows::<StagingBlock, _>(block_conn, &sql, args).map_err(Error::DBError)?;
+        let mut rows = query_rows::<StagingBlock, _>(block_conn, &sql, args)
+            .map_err(ChainstateError::DBError)?;
         let len = rows.len();
         match len {
             0 => Ok(None),
@@ -1020,10 +1010,10 @@ impl StacksChainState {
     pub fn load_staging_block_info(
         block_conn: &DBConn,
         index_block_hash: &StacksBlockId,
-    ) -> Result<Option<StagingBlock>, Error> {
+    ) -> Result<Option<StagingBlock>, ChainstateError> {
         let sql = "SELECT * FROM staging_blocks WHERE index_block_hash = ?1 AND orphaned = 0";
         let args: &[&dyn ToSql] = &[&index_block_hash];
-        query_row::<StagingBlock, _>(block_conn, sql, args).map_err(Error::DBError)
+        query_row::<StagingBlock, _>(block_conn, sql, args).map_err(ChainstateError::DBError)
     }
 
     #[cfg(test)]
@@ -1032,7 +1022,7 @@ impl StacksChainState {
         blocks_path: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<StacksBlock>, Error> {
+    ) -> Result<Option<StacksBlock>, ChainstateError> {
         match StacksChainState::load_staging_block(
             block_conn,
             blocks_path,
@@ -1046,7 +1036,7 @@ impl StacksChainState {
 
                 match StacksBlock::consensus_deserialize(&mut &staging_block.block_data[..]) {
                     Ok(block) => Ok(Some(block)),
-                    Err(e) => Err(Error::NetError(e)),
+                    Err(e) => Err(ChainstateError::NetError(e)),
                 }
             }
             None => Ok(None),
@@ -1058,11 +1048,11 @@ impl StacksChainState {
         block_conn: &DBConn,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Vec<StagingUserBurnSupport>, Error> {
+    ) -> Result<Vec<StagingUserBurnSupport>, ChainstateError> {
         let sql = "SELECT * FROM staging_user_burn_support WHERE anchored_block_hash = ?1 AND consensus_hash = ?2".to_string();
         let args: &[&dyn ToSql] = &[&block_hash, &consensus_hash];
         let rows = query_rows::<StagingUserBurnSupport, _>(block_conn, &sql, args)
-            .map_err(Error::DBError)?;
+            .map_err(ChainstateError::DBError)?;
         Ok(rows)
     }
 
@@ -1071,12 +1061,12 @@ impl StacksChainState {
         block_conn: &DBConn,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<Hash160>, Error> {
+    ) -> Result<Option<Hash160>, ChainstateError> {
         let sql = format!("SELECT microblock_pubkey_hash FROM staging_blocks WHERE anchored_block_hash = ?1 AND consensus_hash = ?2 AND processed = 0 AND orphaned = 0");
         let args: &[&dyn ToSql] = &[&block_hash, &consensus_hash];
         let rows =
             query_row_columns::<Hash160, _>(block_conn, &sql, args, "microblock_pubkey_hash")
-                .map_err(Error::DBError)?;
+                .map_err(ChainstateError::DBError)?;
         match rows.len() {
             0 => Ok(None),
             1 => Ok(Some(rows[0].clone())),
@@ -1093,7 +1083,7 @@ impl StacksChainState {
         block_path: &String,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<Hash160>, Error> {
+    ) -> Result<Option<Hash160>, ChainstateError> {
         let pubkey_hash = match StacksChainState::load_staging_block_pubkey_hash(
             block_conn,
             consensus_hash,
@@ -1127,10 +1117,10 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         parent_index_block_hash: &StacksBlockId,
         microblock_hash: &BlockHeaderHash,
-    ) -> Result<Option<StagingMicroblock>, Error> {
+    ) -> Result<Option<StagingMicroblock>, ChainstateError> {
         let sql = "SELECT * FROM staging_microblocks WHERE index_block_hash = ?1 AND microblock_hash = ?2 AND orphaned = 0 LIMIT 1";
         let args: &[&dyn ToSql] = &[&parent_index_block_hash, &microblock_hash];
-        query_row::<StagingMicroblock, _>(blocks_conn, sql, args).map_err(Error::DBError)
+        query_row::<StagingMicroblock, _>(blocks_conn, sql, args).map_err(ChainstateError::DBError)
     }
 
     /// Load up a preprocessed microblock's staging info (processed or not), via its index
@@ -1140,10 +1130,10 @@ impl StacksChainState {
     pub fn load_staging_microblock_info_indexed(
         blocks_conn: &DBConn,
         index_microblock_hash: &StacksBlockId,
-    ) -> Result<Option<StagingMicroblock>, Error> {
+    ) -> Result<Option<StagingMicroblock>, ChainstateError> {
         let sql = "SELECT * FROM staging_microblocks WHERE index_microblock_hash = ?1 AND orphaned = 0 LIMIT 1";
         let args: &[&dyn ToSql] = &[&index_microblock_hash];
-        query_row::<StagingMicroblock, _>(blocks_conn, sql, args).map_err(Error::DBError)
+        query_row::<StagingMicroblock, _>(blocks_conn, sql, args).map_err(ChainstateError::DBError)
     }
 
     /// Load up a preprocessed microblock (processed or not)
@@ -1152,7 +1142,7 @@ impl StacksChainState {
         parent_consensus_hash: &ConsensusHash,
         parent_block_hash: &BlockHeaderHash,
         microblock_hash: &BlockHeaderHash,
-    ) -> Result<Option<StagingMicroblock>, Error> {
+    ) -> Result<Option<StagingMicroblock>, ChainstateError> {
         let parent_index_hash =
             StacksBlockHeader::make_index_block_hash(parent_consensus_hash, parent_block_hash);
         match StacksChainState::load_staging_microblock_info(
@@ -1183,7 +1173,7 @@ impl StacksChainState {
         parent_anchored_block_hash: &BlockHeaderHash,
         tip_microblock_hash: &BlockHeaderHash,
         processed_only: bool,
-    ) -> Result<Option<Vec<StacksMicroblock>>, Error> {
+    ) -> Result<Option<Vec<StacksMicroblock>>, ChainstateError> {
         let mut ret = vec![];
         let mut mblock_hash = tip_microblock_hash.clone();
         let mut last_seq = u16::MAX;
@@ -1265,7 +1255,7 @@ impl StacksChainState {
         parent_consensus_hash: &ConsensusHash,
         parent_anchored_block_hash: &BlockHeaderHash,
         tip_microblock_hash: &BlockHeaderHash,
-    ) -> Result<Option<Vec<StacksMicroblock>>, Error> {
+    ) -> Result<Option<Vec<StacksMicroblock>>, ChainstateError> {
         StacksChainState::inner_load_microblock_stream_fork(
             blocks_conn,
             parent_consensus_hash,
@@ -1281,7 +1271,7 @@ impl StacksChainState {
         parent_consensus_hash: &ConsensusHash,
         parent_anchored_block_hash: &BlockHeaderHash,
         tip_microblock_hash: &BlockHeaderHash,
-    ) -> Result<Option<Vec<StacksMicroblock>>, Error> {
+    ) -> Result<Option<Vec<StacksMicroblock>>, ChainstateError> {
         StacksChainState::inner_load_microblock_stream_fork(
             blocks_conn,
             parent_consensus_hash,
@@ -1296,7 +1286,7 @@ impl StacksChainState {
         parent_index_block_hash: &StacksBlockId,
         start_seq: u16,
         last_seq: u16,
-    ) -> Result<Option<Vec<StacksMicroblock>>, Error> {
+    ) -> Result<Option<Vec<StacksMicroblock>>, ChainstateError> {
         let res = StacksChainState::load_descendant_staging_microblock_stream_with_poison(
             blocks_conn,
             parent_index_block_hash,
@@ -1316,7 +1306,7 @@ impl StacksChainState {
         parent_index_block_hash: &StacksBlockId,
         start_seq: u16,
         last_seq: u16,
-    ) -> Result<Option<(Vec<StacksMicroblock>, Option<TransactionPayload>)>, Error> {
+    ) -> Result<Option<(Vec<StacksMicroblock>, Option<TransactionPayload>)>, ChainstateError> {
         assert!(last_seq >= start_seq);
 
         let sql = if start_seq == last_seq {
@@ -1327,8 +1317,8 @@ impl StacksChainState {
         };
 
         let args: &[&dyn ToSql] = &[parent_index_block_hash, &start_seq, &last_seq];
-        let staging_microblocks =
-            query_rows::<StagingMicroblock, _>(blocks_conn, &sql, args).map_err(Error::DBError)?;
+        let staging_microblocks = query_rows::<StagingMicroblock, _>(blocks_conn, &sql, args)
+            .map_err(ChainstateError::DBError)?;
 
         if staging_microblocks.len() == 0 {
             // haven't seen any microblocks that descend from this block yet
@@ -1405,7 +1395,7 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         parent_index_block_hash: &StacksBlockId,
         seq: u16,
-    ) -> Result<Option<StacksMicroblock>, Error> {
+    ) -> Result<Option<StacksMicroblock>, ChainstateError> {
         StacksChainState::load_descendant_staging_microblock_stream(
             blocks_conn,
             parent_index_block_hash,
@@ -1419,18 +1409,21 @@ impl StacksChainState {
     }
 
     /// stacks_block _must_ have been committed, or this will return an error
-    pub fn get_parent(&self, stacks_block: &StacksBlockId) -> Result<StacksBlockId, Error> {
+    pub fn get_parent(
+        &self,
+        stacks_block: &StacksBlockId,
+    ) -> Result<StacksBlockId, ChainstateError> {
         let sql = "SELECT parent_block_id FROM block_headers WHERE index_block_hash = ?";
         self.db()
             .query_row(sql, &[stacks_block], |row| row.get(0))
-            .map_err(|e| Error::from(db_error::from(e)))
+            .map_err(|e| ChainstateError::from(db_error::from(e)))
     }
 
     pub fn get_parent_consensus_hash(
         sort_ic: &SortitionDBConn,
         parent_block_hash: &BlockHeaderHash,
         my_consensus_hash: &ConsensusHash,
-    ) -> Result<Option<ConsensusHash>, Error> {
+    ) -> Result<Option<ConsensusHash>, ChainstateError> {
         let sort_handle = SortitionHandleConn::open_reader_consensus(sort_ic, my_consensus_hash)?;
 
         // find all blocks that we have that could be this block's parent
@@ -1455,7 +1448,7 @@ impl StacksChainState {
         blocks_path: &String,
         consensus_hash: &ConsensusHash,
         anchored_block_hash: &BlockHeaderHash,
-    ) -> Result<Option<(StacksBlockHeader, ConsensusHash)>, Error> {
+    ) -> Result<Option<(StacksBlockHeader, ConsensusHash)>, ChainstateError> {
         let header = match StacksChainState::load_block_header(
             blocks_path,
             consensus_hash,
@@ -1503,7 +1496,7 @@ impl StacksChainState {
         commit_burn: u64,
         sortition_burn: u64,
         download_time: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         debug!(
             "Store anchored block {}/{}, parent in {}",
             consensus_hash,
@@ -1528,7 +1521,7 @@ impl StacksChainState {
                 has_parent_args,
                 "anchored_block_hash",
             )
-            .map_err(Error::DBError)?;
+            .map_err(ChainstateError::DBError)?;
             if rows.len() > 0 {
                 // still have unprocessed parent -- this block is not attachable
                 debug!(
@@ -1584,7 +1577,7 @@ impl StacksChainState {
         ];
 
         tx.execute(&sql, args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         StacksChainState::store_block(blocks_path, consensus_hash, block)?;
 
@@ -1595,7 +1588,7 @@ impl StacksChainState {
         let children_args = [&block_hash];
 
         tx.execute(&children_sql, &children_args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         Ok(())
     }
@@ -1611,7 +1604,7 @@ impl StacksChainState {
         parent_consensus_hash: &ConsensusHash,
         parent_anchored_block_hash: &BlockHeaderHash,
         microblock: &StacksMicroblock,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         test_debug!(
             "Store staging microblock {}/{}-{}",
             parent_consensus_hash,
@@ -1622,7 +1615,7 @@ impl StacksChainState {
         let mut microblock_bytes = vec![];
         microblock
             .consensus_serialize(&mut microblock_bytes)
-            .map_err(Error::NetError)?;
+            .map_err(ChainstateError::NetError)?;
 
         let index_block_hash = StacksBlockHeader::make_index_block_hash(
             parent_consensus_hash,
@@ -1649,7 +1642,7 @@ impl StacksChainState {
         ];
 
         tx.execute(&sql, args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         // store microblock bytes
         let block_sql = "INSERT OR REPLACE INTO staging_microblocks_data \
@@ -1658,7 +1651,7 @@ impl StacksChainState {
         let block_args: &[&dyn ToSql] = &[&microblock.block_hash(), &microblock_bytes];
 
         tx.execute(&block_sql, block_args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         Ok(())
     }
@@ -1669,7 +1662,7 @@ impl StacksChainState {
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
         burn_supports: &Vec<UserBurnSupportOp>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         for burn_support in burn_supports.iter() {
             assert!(burn_support.burn_fee < i64::max_value() as u64);
         }
@@ -1685,20 +1678,24 @@ impl StacksChainState {
             ];
 
             tx.execute(&sql, args)
-                .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+                .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
         }
 
         Ok(())
     }
 
     /// Read all the i64 values from a query (possibly none).
-    fn read_i64s(conn: &DBConn, query: &str, args: &[&dyn ToSql]) -> Result<Vec<i64>, Error> {
+    fn read_i64s(
+        conn: &DBConn,
+        query: &str,
+        args: &[&dyn ToSql],
+    ) -> Result<Vec<i64>, ChainstateError> {
         let mut stmt = conn
             .prepare(query)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
         let mut rows = stmt
             .query(args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         // gather
         let mut row_data: Vec<i64> = vec![];
@@ -1719,7 +1716,7 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<bool>, Error> {
+    ) -> Result<Option<bool>, ChainstateError> {
         StacksChainState::read_i64s(blocks_conn, "SELECT processed FROM staging_blocks WHERE anchored_block_hash = ?1 AND consensus_hash = ?2", &[block_hash, consensus_hash])
             .and_then(|processed| {
                 if processed.len() == 0 {
@@ -1729,7 +1726,7 @@ impl StacksChainState {
                     Ok(Some(processed[0] != 0))
                 }
                 else {
-                    Err(Error::DBError(db_error::Overflow))
+                    Err(ChainstateError::DBError(db_error::Overflow))
                 }
             })
     }
@@ -1739,7 +1736,7 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         StacksChainState::read_i64s(blocks_conn, "SELECT orphaned FROM staging_blocks WHERE anchored_block_hash = ?1 AND consensus_hash = ?2", &[block_hash, consensus_hash])
             .and_then(|orphaned| {
                 if orphaned.len() == 0 {
@@ -1749,7 +1746,7 @@ impl StacksChainState {
                     Ok(orphaned[0] != 0)
                 }
                 else {
-                    Err(Error::DBError(db_error::Overflow))
+                    Err(ChainstateError::DBError(db_error::Overflow))
                 }
             })
     }
@@ -1764,7 +1761,7 @@ impl StacksChainState {
         parent_consensus_hash: &ConsensusHash,
         parent_block_hash: &BlockHeaderHash,
         microblock_hash: &BlockHeaderHash,
-    ) -> Result<Option<bool>, Error> {
+    ) -> Result<Option<bool>, ChainstateError> {
         StacksChainState::read_i64s(&self.db(), "SELECT processed FROM staging_microblocks WHERE anchored_block_hash = ?1 AND microblock_hash = ?2 AND consensus_hash = ?3", &[&parent_block_hash, microblock_hash, &parent_consensus_hash])
             .and_then(|processed| {
                 if processed.len() == 0 {
@@ -1774,7 +1771,7 @@ impl StacksChainState {
                     Ok(Some(processed[0] != 0))
                 }
                 else {
-                    Err(Error::DBError(db_error::Overflow))
+                    Err(ChainstateError::DBError(db_error::Overflow))
                 }
             })
     }
@@ -1786,7 +1783,7 @@ impl StacksChainState {
     pub fn has_processed_microblocks(
         &self,
         child_index_block_hash: &StacksBlockId,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         let (parent_consensus_hash, parent_block_hash) =
             match StacksChainState::get_parent_block_header_hashes(
                 &self.db(),
@@ -1828,7 +1825,7 @@ impl StacksChainState {
     pub fn get_blocks_inventory(
         &self,
         header_hashes: &[(ConsensusHash, Option<BlockHeaderHash>)],
-    ) -> Result<BlocksInvData, Error> {
+    ) -> Result<BlocksInvData, ChainstateError> {
         let mut block_bits = vec![];
         let mut microblock_bits = vec![];
 
@@ -1918,7 +1915,7 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         match StacksChainState::get_staging_block_status(blocks_conn, consensus_hash, block_hash)? {
             Some(processed) => Ok(!processed),
             None => Ok(false),
@@ -1929,13 +1926,13 @@ impl StacksChainState {
     fn delete_microblock_data<'a>(
         tx: &mut DBTx<'a>,
         microblock_hash: &BlockHeaderHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         // clear out the block data from staging
         let clear_sql = "DELETE FROM staging_microblocks_data WHERE block_hash = ?1".to_string();
         let clear_args = [&microblock_hash];
 
         tx.execute(&clear_sql, &clear_args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         Ok(())
     }
@@ -1947,7 +1944,7 @@ impl StacksChainState {
         blocks_path: &String,
         consensus_hash: &ConsensusHash,
         anchored_block_hash: &BlockHeaderHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         // This block is orphaned
         let update_block_sql = "UPDATE staging_blocks SET orphaned = 1, processed = 1, attachable = 0 WHERE consensus_hash = ?1 AND anchored_block_hash = ?2".to_string();
         let update_block_args: &[&dyn ToSql] = &[consensus_hash, anchored_block_hash];
@@ -1966,23 +1963,23 @@ impl StacksChainState {
             find_orphaned_microblocks_args,
             "microblock_hash",
         )
-        .map_err(Error::DBError)?;
+        .map_err(ChainstateError::DBError)?;
 
         // drop microblocks (this processes them)
         let update_microblock_children_sql = "UPDATE staging_microblocks SET orphaned = 1, processed = 1 WHERE consensus_hash = ?1 AND anchored_block_hash = ?2".to_string();
         let update_microblock_children_args: &[&dyn ToSql] = &[consensus_hash, anchored_block_hash];
 
         tx.execute(&update_block_sql, update_block_args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         tx.execute(&update_children_sql, update_children_args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         tx.execute(
             &update_microblock_children_sql,
             update_microblock_children_args,
         )
-        .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+        .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         for mblock_hash in orphaned_microblock_hashes {
             StacksChainState::delete_microblock_data(tx, &mblock_hash)?;
@@ -2014,7 +2011,7 @@ impl StacksChainState {
         consensus_hash: &ConsensusHash,
         anchored_block_hash: &BlockHeaderHash,
         accept: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         let sql = "SELECT * FROM staging_blocks WHERE consensus_hash = ?1 AND anchored_block_hash = ?2 AND orphaned = 0".to_string();
         let args: &[&dyn ToSql] = &[&consensus_hash, &anchored_block_hash];
 
@@ -2027,14 +2024,15 @@ impl StacksChainState {
         let _block_path =
             StacksChainState::make_block_dir(blocks_path, consensus_hash, anchored_block_hash)?;
 
-        let rows = query_rows::<StagingBlock, _>(tx, &sql, args).map_err(Error::DBError)?;
+        let rows =
+            query_rows::<StagingBlock, _>(tx, &sql, args).map_err(ChainstateError::DBError)?;
         let block = match rows.len() {
             0 => {
                 // not an error if this block was already orphaned
                 let orphan_sql = "SELECT * FROM staging_blocks WHERE consensus_hash = ?1 AND anchored_block_hash = ?2 AND orphaned = 1".to_string();
                 let orphan_args: &[&dyn ToSql] = &[&consensus_hash, &anchored_block_hash];
                 let orphan_rows = query_rows::<StagingBlock, _>(tx, &orphan_sql, orphan_args)
-                    .map_err(Error::DBError)?;
+                    .map_err(ChainstateError::DBError)?;
                 if orphan_rows.len() == 1 {
                     return Ok(());
                 } else {
@@ -2043,7 +2041,7 @@ impl StacksChainState {
                         consensus_hash,
                         anchored_block_hash
                     );
-                    return Err(Error::DBError(db_error::NotFoundError));
+                    return Err(ChainstateError::DBError(db_error::NotFoundError));
                 }
             }
             1 => rows[0].clone(),
@@ -2093,7 +2091,7 @@ impl StacksChainState {
         ];
 
         tx.execute(&update_sql, update_args)
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         if accept {
             // if we accepted this block, then children of this processed block are now attachable.
@@ -2104,7 +2102,7 @@ impl StacksChainState {
             let update_children_args = [&anchored_block_hash];
 
             tx.execute(&update_children_sql, &update_children_args)
-                .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+                .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
             // mark this block as processed in the burn db too
             match sort_tx_opt {
@@ -2146,7 +2144,7 @@ impl StacksChainState {
         consensus_hash: &ConsensusHash,
         anchored_block_hash: &BlockHeaderHash,
         invalid_block_hash: &BlockHeaderHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         // find offending sequence
         let seq_sql = "SELECT sequence FROM staging_microblocks WHERE consensus_hash = ?1 AND anchored_block_hash = ?2 AND microblock_hash = ?3 AND processed = 0 AND orphaned = 0".to_string();
         let seq_args: &[&dyn ToSql] = &[&consensus_hash, &anchored_block_hash, &invalid_block_hash];
@@ -2158,7 +2156,7 @@ impl StacksChainState {
                     return Ok(());
                 }
                 _ => {
-                    return Err(Error::DBError(e));
+                    return Err(ChainstateError::DBError(e));
                 }
             },
         };
@@ -2179,7 +2177,7 @@ impl StacksChainState {
             &update_microblock_children_sql,
             update_microblock_children_args,
         )
-        .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+        .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
         // find all orphaned microblocks hashes, and delete the block data
         let find_orphaned_microblocks_sql = "SELECT microblock_hash FROM staging_microblocks WHERE anchored_block_hash = ?1 AND sequence >= ?2".to_string();
@@ -2190,7 +2188,7 @@ impl StacksChainState {
             find_orphaned_microblocks_args,
             "microblock_hash",
         )
-        .map_err(Error::DBError)?;
+        .map_err(ChainstateError::DBError)?;
 
         // garbage-collect
         for mblock_hash in orphaned_microblock_hashes.iter() {
@@ -2203,7 +2201,7 @@ impl StacksChainState {
             let update_block_children_args = [&mblock_hash];
 
             tx.execute(&update_block_children_sql, &update_block_children_args)
-                .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+                .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
             // mark the block as empty if we haven't already
             let block_path =
@@ -2228,7 +2226,7 @@ impl StacksChainState {
         child_consensus_hash: &ConsensusHash,
         child_anchored_block_hash: &BlockHeaderHash,
         last_microblock_hash: &BlockHeaderHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         let child_index_block_hash = StacksBlockHeader::make_index_block_hash(
             child_consensus_hash,
             child_anchored_block_hash,
@@ -2252,7 +2250,7 @@ impl StacksChainState {
             // confirm this microblock
             let args: &[&dyn ToSql] = &[&parent_consensus_hash, &parent_block_hash, &mblock_hash];
             tx.execute(sql, args)
-                .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+                .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
             // find the parent so we can confirm it as well
             let mblock_info_opt = StacksChainState::load_staging_microblock_info(
@@ -2274,7 +2272,7 @@ impl StacksChainState {
                     "No such staging microblock {}/{}-{}",
                     &parent_consensus_hash, &parent_block_hash, &mblock_hash
                 );
-                return Err(Error::NoSuchBlockError);
+                return Err(ChainstateError::NoSuchBlockError);
             }
         }
 
@@ -2287,7 +2285,7 @@ impl StacksChainState {
         &self,
         child_index_block_hash: &StacksBlockId,
         seq: u16,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         let (parent_consensus_hash, parent_block_hash) =
             match StacksChainState::get_parent_block_header_hashes(
                 &self.db(),
@@ -2309,7 +2307,7 @@ impl StacksChainState {
                     Ok(processed[0] == 0)
                 }
                 else {
-                    Err(Error::DBError(db_error::Overflow))
+                    Err(ChainstateError::DBError(db_error::Overflow))
                 }
             })
     }
@@ -2319,7 +2317,7 @@ impl StacksChainState {
     pub fn has_processed_microblocks_indexed(
         conn: &DBConn,
         index_microblock_hash: &StacksBlockId,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         let sql = "SELECT 1 FROM staging_microblocks WHERE index_microblock_hash = ?1 AND processed = 1 AND orphaned = 0";
         let args: &[&dyn ToSql] = &[index_microblock_hash];
         let res = conn
@@ -2334,7 +2332,7 @@ impl StacksChainState {
     pub fn get_confirmed_microblock_index_hash(
         &self,
         child_index_block_hash: &StacksBlockId,
-    ) -> Result<Option<StacksBlockId>, Error> {
+    ) -> Result<Option<StacksBlockId>, ChainstateError> {
         // get parent's consensus hash and block hash
         let (parent_consensus_hash, _) = match StacksChainState::get_parent_block_header_hashes(
             &self.db(),
@@ -2371,7 +2369,7 @@ impl StacksChainState {
         &self,
         parent_index_block_hash: &StacksBlockId,
         min_seq: u16,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         StacksChainState::read_i64s(&self.db(), "SELECT processed FROM staging_microblocks WHERE index_block_hash = ?1 AND sequence >= ?2 LIMIT 1", &[&parent_index_block_hash, &min_seq])
             .and_then(|processed| Ok(processed.len() > 0))
     }
@@ -2384,7 +2382,7 @@ impl StacksChainState {
         &self,
         parent_index_block_hash: &StacksBlockId,
         microblock_hash: &BlockHeaderHash,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         StacksChainState::read_i64s(&self.db(), "SELECT processed FROM staging_microblocks WHERE index_block_hash = ?1 AND microblock_hash = ?2 LIMIT 1", &[parent_index_block_hash, microblock_hash])
             .and_then(|processed| Ok(processed.len() > 0))
     }
@@ -2395,7 +2393,7 @@ impl StacksChainState {
     fn has_microblocks_indexed(
         &self,
         parent_index_block_hash: &StacksBlockId,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         StacksChainState::read_i64s(
             &self.db(),
             "SELECT processed FROM staging_microblocks WHERE index_block_hash = ?1 LIMIT 1",
@@ -2410,7 +2408,7 @@ impl StacksChainState {
         index_block_hash: &StacksBlockId,
         consensus_hash_col: &str,
         anchored_block_col: &str,
-    ) -> Result<Option<(ConsensusHash, BlockHeaderHash)>, Error> {
+    ) -> Result<Option<(ConsensusHash, BlockHeaderHash)>, ChainstateError> {
         let sql = format!(
             "SELECT {},{} FROM staging_blocks WHERE index_block_hash = ?1",
             consensus_hash_col, anchored_block_col
@@ -2426,14 +2424,14 @@ impl StacksChainState {
                 Ok((consensus_hash, anchored_block_hash))
             })
             .optional()
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))
     }
 
     /// Given an index block hash, get its consensus hash and block hash if it exists
     pub fn get_block_header_hashes(
         &self,
         index_block_hash: &StacksBlockId,
-    ) -> Result<Option<(ConsensusHash, BlockHeaderHash)>, Error> {
+    ) -> Result<Option<(ConsensusHash, BlockHeaderHash)>, ChainstateError> {
         StacksChainState::inner_get_block_header_hashes(
             &self.db(),
             index_block_hash,
@@ -2446,7 +2444,7 @@ impl StacksChainState {
     pub fn get_parent_block_header_hashes(
         blocks_conn: &DBConn,
         index_block_hash: &StacksBlockId,
-    ) -> Result<Option<(ConsensusHash, BlockHeaderHash)>, Error> {
+    ) -> Result<Option<(ConsensusHash, BlockHeaderHash)>, ChainstateError> {
         StacksChainState::inner_get_block_header_hashes(
             blocks_conn,
             index_block_hash,
@@ -2460,7 +2458,7 @@ impl StacksChainState {
     pub fn get_microblock_parent_header_hashes(
         blocks_conn: &DBConn,
         index_microblock_hash: &StacksBlockId,
-    ) -> Result<Option<(ConsensusHash, BlockHeaderHash, BlockHeaderHash)>, Error> {
+    ) -> Result<Option<(ConsensusHash, BlockHeaderHash, BlockHeaderHash)>, ChainstateError> {
         let sql = format!("SELECT consensus_hash,anchored_block_hash,microblock_hash FROM staging_microblocks WHERE index_microblock_hash = ?1");
         let args = [index_microblock_hash as &dyn ToSql];
 
@@ -2475,7 +2473,7 @@ impl StacksChainState {
                 Ok((consensus_hash, anchored_block_hash, microblock_hash))
             })
             .optional()
-            .map_err(|e| Error::DBError(db_error::SqliteError(e)))
+            .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))
     }
 
     /// Get the sqlite rowid for a staging microblock, given the hash of the microblock.
@@ -2484,7 +2482,7 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         parent_index_block_hash: &StacksBlockId,
         microblock_hash: &BlockHeaderHash,
-    ) -> Result<Option<i64>, Error> {
+    ) -> Result<Option<i64>, ChainstateError> {
         let sql = "SELECT staging_microblocks_data.rowid FROM \
                    staging_microblocks JOIN staging_microblocks_data \
                    ON staging_microblocks.microblock_hash = staging_microblocks_data.block_hash \
@@ -2493,7 +2491,7 @@ impl StacksChainState {
             parent_index_block_hash as &dyn ToSql,
             microblock_hash as &dyn ToSql,
         ];
-        query_row(blocks_conn, sql, &args).map_err(Error::DBError)
+        query_row(blocks_conn, sql, &args).map_err(ChainstateError::DBError)
     }
 
     /// Load up the metadata on a microblock stream (but don't get the data itself)
@@ -2502,12 +2500,12 @@ impl StacksChainState {
     fn stream_microblock_get_info(
         blocks_conn: &DBConn,
         parent_index_block_hash: &StacksBlockId,
-    ) -> Result<Vec<StagingMicroblock>, Error> {
+    ) -> Result<Vec<StagingMicroblock>, ChainstateError> {
         let sql = "SELECT * FROM staging_microblocks WHERE index_block_hash = ?1 ORDER BY sequence"
             .to_string();
         let args = [parent_index_block_hash as &dyn ToSql];
-        let microblock_info =
-            query_rows::<StagingMicroblock, _>(blocks_conn, &sql, &args).map_err(Error::DBError)?;
+        let microblock_info = query_rows::<StagingMicroblock, _>(blocks_conn, &sql, &args)
+            .map_err(ChainstateError::DBError)?;
         Ok(microblock_info)
     }
 
@@ -2517,14 +2515,15 @@ impl StacksChainState {
         stream: &mut BlockStreamData,
         input: &mut R,
         count: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         input
             .seek(SeekFrom::Start(stream.offset))
-            .map_err(Error::ReadError)?;
+            .map_err(ChainstateError::ReadError)?;
 
         let mut buf = vec![0u8; count as usize];
-        let nr = input.read(&mut buf).map_err(Error::ReadError)?;
-        fd.write_all(&buf[0..nr]).map_err(Error::WriteError)?;
+        let nr = input.read(&mut buf).map_err(ChainstateError::ReadError)?;
+        fd.write_all(&buf[0..nr])
+            .map_err(ChainstateError::WriteError)?;
 
         stream.offset += nr as u64;
         stream.total_bytes += nr as u64;
@@ -2539,7 +2538,7 @@ impl StacksChainState {
         fd: &mut W,
         stream: &mut BlockStreamData,
         count: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         let rowid = match stream.rowid {
             None => {
                 // need to get rowid in order to get the blob
@@ -2551,7 +2550,7 @@ impl StacksChainState {
                     Some(rid) => rid,
                     None => {
                         test_debug!("Microblock hash={:?} not in DB", &stream.microblock_hash,);
-                        return Err(Error::NoSuchBlockError);
+                        return Err(ChainstateError::NoSuchBlockError);
                     }
                 }
             }
@@ -2571,9 +2570,9 @@ impl StacksChainState {
                 match e {
                     sqlite_error::SqliteFailure(_, _) => {
                         // blob got moved out of staging
-                        Error::NoSuchBlockError
+                        ChainstateError::NoSuchBlockError
                     }
-                    _ => Error::DBError(db_error::SqliteError(e)),
+                    _ => ChainstateError::DBError(db_error::SqliteError(e)),
                 }
             })?;
 
@@ -2597,7 +2596,7 @@ impl StacksChainState {
         fd: &mut W,
         stream: &mut BlockStreamData,
         count: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         let mut to_write = count;
         while to_write > 0 {
             let nw =
@@ -2664,7 +2663,7 @@ impl StacksChainState {
         fd: &mut W,
         stream: &mut BlockStreamData,
         count: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         let block_path =
             StacksChainState::get_index_block_path(blocks_path, &stream.index_block_hash)?;
 
@@ -2680,9 +2679,9 @@ impl StacksChainState {
             .map_err(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
                     error!("File not found: {:?}", &block_path);
-                    Error::NoSuchBlockError
+                    ChainstateError::NoSuchBlockError
                 } else {
-                    Error::ReadError(e)
+                    ChainstateError::ReadError(e)
                 }
             })?;
 
@@ -2697,7 +2696,7 @@ impl StacksChainState {
         fd: &mut W,
         stream: &mut BlockStreamData,
         count: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         StacksChainState::stream_data_from_chunk_store(&self.blocks_path, fd, stream, count)
     }
 
@@ -2709,7 +2708,7 @@ impl StacksChainState {
         fd: &mut W,
         stream: &mut BlockStreamData,
         count: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         let mut to_write = count;
         while to_write > 0 {
             let nw =
@@ -2718,7 +2717,7 @@ impl StacksChainState {
                 // EOF on microblock blob; move to the next one
                 let next_seq = match stream.seq {
                     u16::MAX => {
-                        return Err(Error::NoSuchBlockError);
+                        return Err(ChainstateError::NoSuchBlockError);
                     }
                     x => x + 1,
                 };
@@ -2980,7 +2979,7 @@ impl StacksChainState {
         block: &StacksBlock,
         mainnet: bool,
         chain_id: u32,
-    ) -> Result<Option<(u64, u64)>, Error> {
+    ) -> Result<Option<(u64, u64)>, ChainstateError> {
         // sortition-winning block commit for this block?
         let block_hash = block.block_hash();
         let (block_commit, stacks_chain_tip) = match db_handle
@@ -3082,7 +3081,7 @@ impl StacksChainState {
         block: &StacksBlock,
         parent_consensus_hash: &ConsensusHash,
         download_time: u64,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         debug!(
             "preprocess anchored block {}/{}",
             consensus_hash,
@@ -3165,7 +3164,7 @@ impl StacksChainState {
                 )?;
 
                 block_tx.commit()?;
-                return Err(Error::InvalidStacksBlock(msg));
+                return Err(ChainstateError::InvalidStacksBlock(msg));
             }
         };
 
@@ -3215,7 +3214,7 @@ impl StacksChainState {
         parent_consensus_hash: &ConsensusHash,
         parent_anchored_block_hash: &BlockHeaderHash,
         microblock: &StacksMicroblock,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         debug!(
             "preprocess microblock {}/{}-{}, parent {}",
             parent_consensus_hash,
@@ -3270,7 +3269,10 @@ impl StacksChainState {
                 &e
             );
             warn!("{}", &msg);
-            return Err(Error::InvalidStacksMicroblock(msg, microblock.block_hash()));
+            return Err(ChainstateError::InvalidStacksMicroblock(
+                msg,
+                microblock.block_hash(),
+            ));
         }
 
         // static checks on transactions all pass
@@ -3281,7 +3283,10 @@ impl StacksChainState {
                 microblock.block_hash()
             );
             warn!("{}", &msg);
-            return Err(Error::InvalidStacksMicroblock(msg, microblock.block_hash()));
+            return Err(ChainstateError::InvalidStacksMicroblock(
+                msg,
+                microblock.block_hash(),
+            ));
         }
 
         // add to staging
@@ -3306,13 +3311,13 @@ impl StacksChainState {
         snapshot: &BlockSnapshot,
         block: &StacksBlock,
         microblocks: &Vec<StacksMicroblock>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         let parent_sn = {
             let db_handle = sort_ic.as_handle(&snapshot.sortition_id);
             let sn = match db_handle.get_block_snapshot(&snapshot.parent_burn_header_hash)? {
                 Some(sn) => sn,
                 None => {
-                    return Err(Error::NoSuchBlockError);
+                    return Err(ChainstateError::NoSuchBlockError);
                 }
             };
             sn
@@ -3386,10 +3391,12 @@ impl StacksChainState {
         burnchain_commit_burn: u64,
         burnchain_sortition_burn: u64,
         coinbase_reward_ustx: u128,
-    ) -> Result<MinerPaymentSchedule, Error> {
-        let coinbase_tx = block.get_coinbase_tx().ok_or(Error::InvalidStacksBlock(
-            "No coinbase transaction".to_string(),
-        ))?;
+    ) -> Result<MinerPaymentSchedule, ChainstateError> {
+        let coinbase_tx = block
+            .get_coinbase_tx()
+            .ok_or(ChainstateError::InvalidStacksBlock(
+                "No coinbase transaction".to_string(),
+            ))?;
         let miner_auth = coinbase_tx.get_origin();
         let miner_addr = if mainnet {
             miner_auth.address_mainnet()
@@ -3425,7 +3432,7 @@ impl StacksChainState {
     fn find_parent_microblock_stream(
         blocks_conn: &DBConn,
         staging_block: &StagingBlock,
-    ) -> Result<Option<Vec<StacksMicroblock>>, Error> {
+    ) -> Result<Option<Vec<StacksMicroblock>>, ChainstateError> {
         if staging_block.parent_microblock_hash == EMPTY_MICROBLOCK_PARENT_HASH
             && staging_block.parent_microblock_seq == 0
         {
@@ -3464,14 +3471,14 @@ impl StacksChainState {
     fn process_next_orphaned_staging_block<'a>(
         blocks_tx: &mut DBTx<'a>,
         blocks_path: &String,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ChainstateError> {
         test_debug!("Find next orphaned block");
 
         // go through staging blocks and see if any of them have not been processed yet, but are
         // orphaned
         let sql = "SELECT * FROM staging_blocks WHERE processed = 0 AND orphaned = 1 ORDER BY RANDOM() LIMIT 1".to_string();
-        let mut rows =
-            query_rows::<StagingBlock, _>(blocks_tx, &sql, NO_PARAMS).map_err(Error::DBError)?;
+        let mut rows = query_rows::<StagingBlock, _>(blocks_tx, &sql, NO_PARAMS)
+            .map_err(ChainstateError::DBError)?;
         if rows.len() == 0 {
             test_debug!("No orphans to remove");
             return Ok(false);
@@ -3500,14 +3507,14 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         limit: u64,
         min_arrival_time: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         let sql = "SELECT COUNT(*) FROM staging_blocks WHERE processed = 0 AND attachable = 1 AND orphaned = 0 AND arrival_time >= ?1 LIMIT ?2".to_string();
         let cnt = query_count(
             blocks_conn,
             &sql,
             &[&u64_to_sql(min_arrival_time)?, &u64_to_sql(limit)?],
         )
-        .map_err(Error::DBError)?;
+        .map_err(ChainstateError::DBError)?;
         Ok(cnt as u64)
     }
 
@@ -3517,14 +3524,14 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         limit: u64,
         min_arrival_time: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ChainstateError> {
         let sql = "SELECT COUNT(*) FROM staging_blocks WHERE processed = 1 AND orphaned = 0 AND processed_time > 0 AND processed_time >= ?1 LIMIT ?2".to_string();
         let cnt = query_count(
             blocks_conn,
             &sql,
             &[&u64_to_sql(min_arrival_time)?, &u64_to_sql(limit)?],
         )
-        .map_err(Error::DBError)?;
+        .map_err(ChainstateError::DBError)?;
         Ok(cnt as u64)
     }
 
@@ -3534,7 +3541,7 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         start_height: u64,
         end_height: u64,
-    ) -> Result<Vec<i64>, Error> {
+    ) -> Result<Vec<i64>, ChainstateError> {
         let sql = "SELECT processed_time - arrival_time FROM staging_blocks WHERE processed = 1 AND height >= ?1 AND height < ?2";
         let args: &[&dyn ToSql] = &[&u64_to_sql(start_height)?, &u64_to_sql(end_height)?];
         let list = query_rows::<i64, _>(blocks_conn, &sql, args)?;
@@ -3547,7 +3554,7 @@ impl StacksChainState {
         blocks_conn: &DBConn,
         start_height: u64,
         end_height: u64,
-    ) -> Result<Vec<i64>, Error> {
+    ) -> Result<Vec<i64>, ChainstateError> {
         let sql = "SELECT download_time FROM staging_blocks WHERE height >= ?1 AND height < ?2";
         let args: &[&dyn ToSql] = &[&u64_to_sql(start_height)?, &u64_to_sql(end_height)?];
         let list = query_rows::<i64, _>(blocks_conn, &sql, args)?;
@@ -3562,7 +3569,7 @@ impl StacksChainState {
         blocks_tx: &mut StacksDBTx<'a>,
         blocks_path: &String,
         sort_conn: &DBConn,
-    ) -> Result<Option<(Vec<StacksMicroblock>, StagingBlock)>, Error> {
+    ) -> Result<Option<(Vec<StacksMicroblock>, StagingBlock)>, ChainstateError> {
         test_debug!("Find next staging block");
 
         let mut to_delete = vec![];
@@ -3576,14 +3583,15 @@ impl StacksChainState {
             let sql = "SELECT * FROM staging_blocks WHERE processed = 0 AND attachable = 1 AND orphaned = 0 ORDER BY RANDOM()".to_string();
             let mut stmt = blocks_tx
                 .prepare(&sql)
-                .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+                .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
             let mut rows = stmt
                 .query(NO_PARAMS)
-                .map_err(|e| Error::DBError(db_error::SqliteError(e)))?;
+                .map_err(|e| ChainstateError::DBError(db_error::SqliteError(e)))?;
 
             while let Some(row) = rows.next().map_err(|e| db_error::SqliteError(e))? {
-                let mut candidate = StagingBlock::from_row(&row).map_err(Error::DBError)?;
+                let mut candidate =
+                    StagingBlock::from_row(&row).map_err(ChainstateError::DBError)?;
 
                 debug!(
                     "Consider block {}/{} whose parent is {}/{} with {} parent microblocks tailed at {}",
@@ -3730,7 +3738,8 @@ impl StacksChainState {
     pub fn process_microblocks_transactions(
         clarity_tx: &mut ClarityTx,
         microblocks: &Vec<StacksMicroblock>,
-    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), (Error, BlockHeaderHash)> {
+    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), (ChainstateError, BlockHeaderHash)>
+    {
         let mut fees = 0u128;
         let mut burns = 0u128;
         let mut receipts = vec![];
@@ -3882,7 +3891,7 @@ impl StacksChainState {
     fn process_block_transactions(
         clarity_tx: &mut ClarityTx,
         block: &StacksBlock,
-    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), Error> {
+    ) -> Result<(u128, u128, Vec<StacksTransactionReceipt>), ChainstateError> {
         let mut fees = 0u128;
         let mut burns = 0u128;
         let mut receipts = vec![];
@@ -3903,7 +3912,7 @@ impl StacksChainState {
     fn process_matured_miner_reward<'a>(
         clarity_tx: &mut ClarityTx<'a>,
         miner_reward: &MinerReward,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ChainstateError> {
         let miner_reward_total = miner_reward.total();
         clarity_tx
             .connection()
@@ -3925,7 +3934,7 @@ impl StacksChainState {
                     Ok(())
                 })
             })
-            .map_err(Error::ClarityError)?;
+            .map_err(ChainstateError::ClarityError)?;
         Ok(())
     }
 
@@ -3936,7 +3945,7 @@ impl StacksChainState {
         miner_share: &MinerReward,
         users_share: &Vec<MinerReward>,
         parent_share: &MinerReward,
-    ) -> Result<u128, Error> {
+    ) -> Result<u128, ChainstateError> {
         let mut coinbase_reward = miner_share.coinbase;
         StacksChainState::process_matured_miner_reward(clarity_tx, miner_share)?;
         for reward in users_share.iter() {
@@ -3954,7 +3963,7 @@ impl StacksChainState {
     /// Return the total number of uSTX unlocked in this block
     pub fn process_stx_unlocks<'a>(
         clarity_tx: &mut ClarityTx<'a>,
-    ) -> Result<(u128, Vec<StacksTransactionEvent>), Error> {
+    ) -> Result<(u128, Vec<StacksTransactionEvent>), ChainstateError> {
         let mainnet = clarity_tx.config.mainnet;
         let lockup_contract_id = boot::boot_code_id("lockup", mainnet);
         clarity_tx
@@ -3999,7 +4008,7 @@ impl StacksChainState {
                 }
                 Ok((total_minted, events))
             })
-            .map_err(Error::ClarityError)
+            .map_err(ChainstateError::ClarityError)
     }
 
     /// Given the list of matured miners, find the miner reward schedule that produced the parent
@@ -4008,7 +4017,7 @@ impl StacksChainState {
         stacks_tx: &mut StacksDBTx,
         mainnet: bool,
         latest_matured_miners: &Vec<MinerPaymentSchedule>,
-    ) -> Result<MinerPaymentSchedule, Error> {
+    ) -> Result<MinerPaymentSchedule, ChainstateError> {
         let parent_miner = if let Some(ref miner) = latest_matured_miners.first().as_ref() {
             StacksChainState::get_scheduled_block_rewards_at_block(
                 stacks_tx,
@@ -4064,7 +4073,7 @@ impl StacksChainState {
         burnchain_commit_burn: u64,
         burnchain_sortition_burn: u64,
         user_burns: &Vec<StagingUserBurnSupport>,
-    ) -> Result<StacksEpochReceipt, Error> {
+    ) -> Result<StacksEpochReceipt, ChainstateError> {
         debug!(
             "Process block {:?} with {} transactions",
             &block.block_hash().to_hex(),
@@ -4189,7 +4198,7 @@ impl StacksChainState {
                     warn!("{}", &msg);
 
                     clarity_tx.rollback_block();
-                    return Err(Error::InvalidStacksBlock(msg));
+                    return Err(ChainstateError::InvalidStacksBlock(msg));
                 }
             };
 
@@ -4211,7 +4220,7 @@ impl StacksChainState {
                     warn!("{}", &msg);
 
                     clarity_tx.rollback_block();
-                    return Err(Error::InvalidStacksBlock(msg));
+                    return Err(ChainstateError::InvalidStacksBlock(msg));
                 }
                 Ok(None) => {}
                 Err(e) => {
@@ -4244,7 +4253,7 @@ impl StacksChainState {
                         warn!("{}", &msg);
 
                         clarity_tx.rollback_block();
-                        return Err(Error::InvalidStacksMicroblock(
+                        return Err(ChainstateError::InvalidStacksMicroblock(
                             msg,
                             offending_mblock_header_hash,
                         ));
@@ -4288,7 +4297,7 @@ impl StacksChainState {
                         warn!("{}", &msg);
 
                         clarity_tx.rollback_block();
-                        return Err(Error::InvalidStacksBlock(msg));
+                        return Err(ChainstateError::InvalidStacksBlock(msg));
                     }
                     Ok((block_fees, block_burns, txs_receipts)) => {
                         (block_fees, block_burns, txs_receipts)
@@ -4362,7 +4371,7 @@ impl StacksChainState {
                     warn!("{}", &msg);
 
                     clarity_tx.rollback_block();
-                    return Err(Error::InvalidStacksBlock(msg));
+                    return Err(ChainstateError::InvalidStacksBlock(msg));
                 }
             };
 
@@ -4377,7 +4386,7 @@ impl StacksChainState {
                 warn!("{}", &msg);
 
                 clarity_tx.rollback_block();
-                return Err(Error::InvalidStacksBlock(msg));
+                return Err(ChainstateError::InvalidStacksBlock(msg));
             }
 
             debug!("Reached state root {}", root_hash);
@@ -4499,7 +4508,7 @@ impl StacksChainState {
     fn get_parent_header_info(
         chainstate_tx: &mut ChainstateTx,
         next_staging_block: &StagingBlock,
-    ) -> Result<Option<StacksHeaderInfo>, Error> {
+    ) -> Result<Option<StacksHeaderInfo>, ChainstateError> {
         let parent_block_header_info = match StacksChainState::get_anchored_block_header_info(
             &chainstate_tx.tx,
             &next_staging_block.parent_consensus_hash,
@@ -4538,10 +4547,12 @@ impl StacksChainState {
     }
 
     /// Extract and parse the block from a loaded staging block, and verify its integrity.
-    fn extract_stacks_block(next_staging_block: &StagingBlock) -> Result<StacksBlock, Error> {
+    fn extract_stacks_block(
+        next_staging_block: &StagingBlock,
+    ) -> Result<StacksBlock, ChainstateError> {
         let block = {
             StacksBlock::consensus_deserialize(&mut &next_staging_block.block_data[..])
-                .map_err(Error::NetError)?
+                .map_err(ChainstateError::NetError)?
         };
 
         let block_hash = block.block_hash();
@@ -4551,7 +4562,7 @@ impl StacksChainState {
                 "Staging DB corruption: expected block {}, got {} from disk",
                 next_staging_block.anchored_block_hash, block_hash
             );
-            return Err(Error::DBError(db_error::Corruption));
+            return Err(ChainstateError::DBError(db_error::Corruption));
         }
         Ok(block)
     }
@@ -4565,7 +4576,7 @@ impl StacksChainState {
         next_staging_block: &StagingBlock,
         block: &StacksBlock,
         mut next_microblocks: Vec<StacksMicroblock>,
-    ) -> Result<Vec<StacksMicroblock>, Error> {
+    ) -> Result<Vec<StacksMicroblock>, ChainstateError> {
         // NOTE: since we got the microblocks from staging, where their signatures were already
         // validated, we don't need to validate them again.
         let (microblock_terminus, _) = match StacksChainState::validate_parent_microblock_stream(
@@ -4607,7 +4618,7 @@ impl StacksChainState {
     pub fn process_next_staging_block(
         &mut self,
         sort_tx: &mut SortitionHandleTx,
-    ) -> Result<(Option<StacksEpochReceipt>, Option<TransactionPayload>), Error> {
+    ) -> Result<(Option<StacksEpochReceipt>, Option<TransactionPayload>), ChainstateError> {
         let blocks_path = self.blocks_path.clone();
         let (mut chainstate_tx, clarity_instance) = self.chainstate_tx_begin()?;
 
@@ -4687,7 +4698,7 @@ impl StacksChainState {
                 &next_staging_block.anchored_block_hash,
                 true,
             )?;
-            chainstate_tx.commit().map_err(Error::DBError)?;
+            chainstate_tx.commit().map_err(ChainstateError::DBError)?;
 
             return Ok((None, None));
         }
@@ -4715,9 +4726,9 @@ impl StacksChainState {
                 &next_staging_block.anchored_block_hash,
                 false,
             )?;
-            chainstate_tx.commit().map_err(Error::DBError)?;
+            chainstate_tx.commit().map_err(ChainstateError::DBError)?;
 
-            return Err(Error::InvalidStacksBlock(msg));
+            return Err(ChainstateError::InvalidStacksBlock(msg));
         }
 
         // validation check -- validate parent microblocks and find the ones that connect the
@@ -4798,7 +4809,7 @@ impl StacksChainState {
                 );
 
                 match e {
-                    Error::InvalidStacksMicroblock(ref msg, ref header_hash) => {
+                    ChainstateError::InvalidStacksMicroblock(ref msg, ref header_hash) => {
                         // specifically, an ancestor microblock was invalid.  Drop any descendant microblocks --
                         // they're never going to be valid in _any_ fork, even if they have a clone
                         // in a neighboring burnchain fork.
@@ -4824,7 +4835,7 @@ impl StacksChainState {
                     }
                 }
 
-                chainstate_tx.commit().map_err(Error::DBError)?;
+                chainstate_tx.commit().map_err(ChainstateError::DBError)?;
 
                 return Err(e);
             }
@@ -4879,7 +4890,7 @@ impl StacksChainState {
             true,
         )?;
 
-        chainstate_tx.commit().map_err(Error::DBError)?;
+        chainstate_tx.commit().map_err(ChainstateError::DBError)?;
 
         Ok((Some(epoch_receipt), None))
     }
@@ -4894,7 +4905,8 @@ impl StacksChainState {
         &mut self,
         sort_db: &mut SortitionDB,
         max_blocks: usize,
-    ) -> Result<Vec<(Option<StacksEpochReceipt>, Option<TransactionPayload>)>, Error> {
+    ) -> Result<Vec<(Option<StacksEpochReceipt>, Option<TransactionPayload>)>, ChainstateError>
+    {
         let tx = sort_db.tx_begin_at_tip();
         self.process_blocks(tx, max_blocks)
     }
@@ -4907,7 +4919,8 @@ impl StacksChainState {
         &mut self,
         mut sort_tx: SortitionHandleTx,
         max_blocks: usize,
-    ) -> Result<Vec<(Option<StacksEpochReceipt>, Option<TransactionPayload>)>, Error> {
+    ) -> Result<Vec<(Option<StacksEpochReceipt>, Option<TransactionPayload>)>, ChainstateError>
+    {
         debug!("Process up to {} blocks", max_blocks);
 
         let mut ret = vec![];
@@ -4934,15 +4947,15 @@ impl StacksChainState {
                         }
                     },
                 },
-                Err(Error::InvalidStacksBlock(msg)) => {
+                Err(ChainstateError::InvalidStacksBlock(msg)) => {
                     warn!("Encountered invalid block: {}", &msg);
                     continue;
                 }
-                Err(Error::InvalidStacksMicroblock(msg, hash)) => {
+                Err(ChainstateError::InvalidStacksMicroblock(msg, hash)) => {
                     warn!("Encountered invalid microblock {}: {}", hash, &msg);
                     continue;
                 }
-                Err(Error::NetError(net_error::DeserializeError(msg))) => {
+                Err(ChainstateError::NetError(net_error::DeserializeError(msg))) => {
                     // happens if we load a zero-sized block (i.e. an invalid block)
                     warn!("Encountered invalid block: {}", &msg);
                     continue;
@@ -4988,12 +5001,12 @@ impl StacksChainState {
     pub fn get_stacks_chain_tip(
         &self,
         sortdb: &SortitionDB,
-    ) -> Result<Option<StagingBlock>, Error> {
+    ) -> Result<Option<StagingBlock>, ChainstateError> {
         let (consensus_hash, block_bhh) =
             SortitionDB::get_canonical_stacks_chain_tip_hash(sortdb.conn())?;
         let sql = "SELECT * FROM staging_blocks WHERE processed = 1 AND orphaned = 0 AND consensus_hash = ?1 AND anchored_block_hash = ?2";
         let args: &[&dyn ToSql] = &[&consensus_hash, &block_bhh];
-        query_row(&self.db(), sql, args).map_err(Error::DBError)
+        query_row(&self.db(), sql, args).map_err(ChainstateError::DBError)
     }
 
     /// Get the height of a staging block
@@ -5001,10 +5014,10 @@ impl StacksChainState {
         &self,
         consensus_hash: &ConsensusHash,
         block_hash: &BlockHeaderHash,
-    ) -> Result<Option<u64>, Error> {
+    ) -> Result<Option<u64>, ChainstateError> {
         let sql = "SELECT height FROM staging_blocks WHERE consensus_hash = ?1 AND anchored_block_hash = ?2";
         let args: &[&dyn ToSql] = &[consensus_hash, block_hash];
-        query_row(&self.db(), sql, args).map_err(Error::DBError)
+        query_row(&self.db(), sql, args).map_err(ChainstateError::DBError)
     }
 
     /// This runs checks for the validity of a transaction that
@@ -5320,28 +5333,29 @@ impl StacksChainState {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
-    use chainstate::stacks::db::test::*;
-    use chainstate::stacks::db::*;
-    use chainstate::stacks::miner::test::*;
-    use chainstate::stacks::test::*;
-    use chainstate::stacks::Error as chainstate_error;
-    use chainstate::stacks::*;
+    use std::fs;
+
+    use rand::thread_rng;
+    use rand::Rng;
 
     use burnchains::*;
     use chainstate::burn::db::sortdb::*;
     use chainstate::burn::*;
-    use std::fs;
-    use util::db::Error as db_error;
+    use chainstate::stacks::db::test::*;
+    use chainstate::stacks::db::*;
+    use chainstate::stacks::miner::test::*;
+    use chainstate::stacks::test::*;
+    use chainstate::stacks::*;
+    use core::mempool::*;
+    use net::test::*;
     use util::db::*;
     use util::hash::*;
     use util::retry::*;
 
-    use core::mempool::*;
-    use net::test::*;
+    use crate::util::errors::ChainstateError as chainstate_error;
+    use crate::util::errors::DBError as db_error;
 
-    use rand::thread_rng;
-    use rand::Rng;
+    use super::*;
 
     pub fn make_empty_coinbase_block(mblock_key: &StacksPrivateKey) -> StacksBlock {
         let privk = StacksPrivateKey::from_hex(

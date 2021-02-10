@@ -15,13 +15,15 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::convert::TryInto;
-use vm::analysis::errors::CheckError;
+
 use vm::contexts::{Environment, GlobalContext, OwnedEnvironment};
-use vm::errors::{CheckErrors, Error, RuntimeErrorType};
+use vm::errors::CheckErrors;
 use vm::execute as vm_execute;
+use vm::tests::{execute, symbols_from_values, with_marfed_environment, with_memory_environment};
 use vm::types::{PrincipalData, QualifiedContractIdentifier, ResponseData, TypeSignature, Value};
 
-use vm::tests::{execute, symbols_from_values, with_marfed_environment, with_memory_environment};
+use crate::util::errors::InterpreterError;
+use crate::util::errors::{CheckError, RuntimeErrorType};
 
 #[test]
 fn test_all() {
@@ -221,7 +223,7 @@ fn test_dynamic_dispatch_intra_contract_call(owned_env: &mut OwnedEnvironment) {
             )
             .unwrap_err();
         match err_result {
-            Error::Unchecked(CheckErrors::CircularReference(_)) => {}
+            InterpreterError::Unchecked(CheckErrors::CircularReference(_)) => {}
             _ => panic!("{:?}", err_result),
         }
     }
@@ -478,7 +480,7 @@ fn test_dynamic_dispatch_mismatched_args(owned_env: &mut OwnedEnvironment) {
             )
             .unwrap_err();
         match err_result {
-            Error::Unchecked(CheckErrors::BadTraitImplementation(_, _)) => {}
+            InterpreterError::Unchecked(CheckErrors::BadTraitImplementation(_, _)) => {}
             _ => panic!("{:?}", err_result),
         }
     }
@@ -521,7 +523,7 @@ fn test_dynamic_dispatch_mismatched_returned(owned_env: &mut OwnedEnvironment) {
             )
             .unwrap_err();
         match err_result {
-            Error::Unchecked(CheckErrors::ReturnTypesMustMatch(_, _)) => {}
+            InterpreterError::Unchecked(CheckErrors::ReturnTypesMustMatch(_, _)) => {}
             _ => panic!("{:?}", err_result),
         }
     }
@@ -567,7 +569,7 @@ fn test_reentrant_dynamic_dispatch(owned_env: &mut OwnedEnvironment) {
             )
             .unwrap_err();
         match err_result {
-            Error::Unchecked(CheckErrors::CircularReference(_)) => {}
+            InterpreterError::Unchecked(CheckErrors::CircularReference(_)) => {}
             _ => panic!("{:?}", err_result),
         }
     }
@@ -610,7 +612,7 @@ fn test_readwrite_dynamic_dispatch(owned_env: &mut OwnedEnvironment) {
             )
             .unwrap_err();
         match err_result {
-            Error::Unchecked(CheckErrors::TraitBasedContractCallInReadOnly) => {}
+            InterpreterError::Unchecked(CheckErrors::TraitBasedContractCallInReadOnly) => {}
             _ => panic!("{:?}", err_result),
         }
     }
@@ -653,7 +655,7 @@ fn test_readwrite_violation_dynamic_dispatch(owned_env: &mut OwnedEnvironment) {
             )
             .unwrap_err();
         match err_result {
-            Error::Unchecked(CheckErrors::TraitBasedContractCallInReadOnly) => {}
+            InterpreterError::Unchecked(CheckErrors::TraitBasedContractCallInReadOnly) => {}
             _ => panic!("{:?}", err_result),
         }
     }

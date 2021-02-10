@@ -18,7 +18,7 @@ use chainstate::stacks::events::StacksTransactionEvent;
 use util::hash::hex_bytes;
 use vm::contexts::{AssetMap, AssetMapEntry, GlobalContext, OwnedEnvironment};
 use vm::contracts::Contract;
-use vm::errors::{CheckErrors, Error, RuntimeErrorType};
+use vm::errors::CheckErrors;
 use vm::execute as vm_execute;
 use vm::representations::SymbolicExpression;
 use vm::tests::{
@@ -26,6 +26,8 @@ use vm::tests::{
     with_memory_environment,
 };
 use vm::types::{AssetIdentifier, PrincipalData, QualifiedContractIdentifier, ResponseData, Value};
+
+use crate::util::errors::{InterpreterError, RuntimeErrorType};
 
 const FIRST_CLASS_TOKENS: &str = "(define-fungible-token stackaroos)
          (define-read-only (my-ft-get-balance (account principal))
@@ -128,7 +130,7 @@ fn execute_transaction(
     contract_identifier: &QualifiedContractIdentifier,
     tx: &str,
     args: &[SymbolicExpression],
-) -> Result<(Value, AssetMap, Vec<StacksTransactionEvent>), Error> {
+) -> Result<(Value, AssetMap, Vec<StacksTransactionEvent>), InterpreterError> {
     env.execute_transaction(issuer, contract_identifier.clone(), tx, args)
 }
 
@@ -617,7 +619,7 @@ fn test_simple_token_system(owned_env: &mut OwnedEnvironment) {
     .unwrap_err();
 
     assert!(match err {
-        Error::Unchecked(CheckErrors::TypeValueError(_, _)) => true,
+        InterpreterError::Unchecked(CheckErrors::TypeValueError(_, _)) => true,
         _ => false,
     });
 
@@ -810,7 +812,7 @@ fn total_supply(owned_env: &mut OwnedEnvironment) {
         .initialize_contract(token_contract_id.clone(), bad_0)
         .unwrap_err();
     assert!(match err {
-        Error::Unchecked(CheckErrors::TypeValueError(_, _)) => true,
+        InterpreterError::Unchecked(CheckErrors::TypeValueError(_, _)) => true,
         _ => false,
     });
 
@@ -818,7 +820,7 @@ fn total_supply(owned_env: &mut OwnedEnvironment) {
         .initialize_contract(token_contract_id.clone(), bad_1)
         .unwrap_err();
     assert!(match err {
-        Error::Unchecked(CheckErrors::TypeValueError(_, _)) => true,
+        InterpreterError::Unchecked(CheckErrors::TypeValueError(_, _)) => true,
         _ => false,
     });
 
@@ -866,7 +868,7 @@ fn total_supply(owned_env: &mut OwnedEnvironment) {
     .unwrap_err();
     println!("{}", err);
     assert!(match err {
-        Error::Runtime(RuntimeErrorType::SupplyOverflow(x, y), _) => (x, y) == (6, 5),
+        InterpreterError::Runtime(RuntimeErrorType::SupplyOverflow(x, y), _) => (x, y) == (6, 5),
         _ => false,
     });
 }

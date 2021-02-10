@@ -16,7 +16,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
-use vm::ast::errors::{ParseError, ParseErrors, ParseResult};
+
+use crate::vm::ast::ParseResult;
 use vm::ast::types::{BuildASTPass, ContractAST};
 use vm::costs::cost_functions::ClarityCostFunction;
 use vm::costs::{cost_functions, runtime_cost, CostTracker, LimitedCostTracker};
@@ -28,6 +29,8 @@ use vm::representations::PreSymbolicExpressionType::{
 };
 use vm::representations::{ClarityName, PreSymbolicExpression};
 use vm::types::Value;
+
+use crate::util::errors::{ParseError, ParseErrors};
 
 #[cfg(test)]
 mod tests;
